@@ -211,6 +211,7 @@ export default function App(){
   const [wLog,setWLog]=useState([]);
   const [newW,setNewW]=useState("");
   const [searchQ,setSearchQ]=useState("");
+  const [recentSearches,setRecentSearches]=useState([]);
   const [searchR,setSearchR]=useState([]);
   const [searchLoading,setSearchLoading]=useState(false);
   const [suggestions,setSuggestions]=useState([]);
@@ -237,7 +238,9 @@ export default function App(){
       const t=await sg("fp:templates")||[];
       const wl=await sg("fp:weights")||[];
       const dg=await sg("fp:deficitgoal");
+      const rs=await sg("fp:recentsearches")||[];
       setEntries(e);setWater(w);setTemplates(t);setWLog(wl);
+      setRecentSearches(rs);
       if(dg){setDefGoal(dg);setDgDraft(dg);}
       let s=0,d=new Date();
       for(let i=0;i<365;i++){
@@ -326,6 +329,10 @@ export default function App(){
     setSearchLoading(true);setSearchR([]);
     const r=await searchFood(searchQ);
     setSearchR(r);setSearchLoading(false);
+    // Save to recent searches (max 10, most recent first, no duplicates)
+    const updated=[searchQ.trim(),...recentSearches.filter(s=>s.toLowerCase()!==searchQ.trim().toLowerCase())].slice(0,10);
+    setRecentSearches(updated);
+    await ss("fp:recentsearches",updated);
   };
 
   // ── Suggestions ──
@@ -636,12 +643,28 @@ export default function App(){
             <button onClick={doSearch} disabled={searchLoading} style={{...btnFn(),width:"auto",padding:"10px 14px",flexShrink:0}}>{searchLoading?<Spin/>:"Go"}</button>
           </div>
           <div style={{marginBottom:14}}>
-            <div style={{fontSize:9,color:C.muted,marginBottom:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>Quick searches</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-              {["Big Mac","Coles Greek Yoghurt","Woolworths chicken breast","Aldi protein bar","Subway footlong","KFC Original Piece","Boost Mango","Sanitarium Weet-Bix","Aldi Quest bar","McDonald's McChicken"].map(q=>(
-                <button key={q} onClick={()=>setSearchQ(q)} style={{...chipFn(searchQ===q,C.cyan),padding:"5px 9px",fontSize:10}}>{q}</button>
-              ))}
-            </div>
+            {recentSearches.length>0?(
+              <>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",textTransform:"uppercase"}}>Recent Searches</div>
+                  <button onClick={async()=>{setRecentSearches([]);await ss("fp:recentsearches",[]);}} style={{background:"none",border:"none",color:C.muted,fontSize:9,cursor:"pointer",padding:0}}>Clear all</button>
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                  {recentSearches.map(q=>(
+                    <button key={q} onClick={()=>setSearchQ(q)} style={{...chipFn(searchQ===q,C.cyan),padding:"5px 9px",fontSize:10}}>{q}</button>
+                  ))}
+                </div>
+              </>
+            ):(
+              <>
+                <div style={{fontSize:9,color:C.muted,marginBottom:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>Suggested searches</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                  {["Big Mac","Coles Greek Yoghurt","Woolworths chicken breast","Aldi protein bar","Subway footlong","KFC Original Piece","Boost Mango","Weet-Bix"].map(q=>(
+                    <button key={q} onClick={()=>setSearchQ(q)} style={{...chipFn(searchQ===q,C.cyan),padding:"5px 9px",fontSize:10}}>{q}</button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
           {searchLoading&&<div style={{textAlign:"center",padding:"28px 0",color:C.muted,fontSize:12}}><Spin col={C.orange}/><br/><span style={{display:"block",marginTop:8}}>Searching nutrition data…</span></div>}
           {searchR.map((r,i)=>(
