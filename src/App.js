@@ -221,6 +221,10 @@ export default function App(){
   const [savedToday,setSavedToday]=useState(false);
   const [editMode,setEditMode]=useState(false);
   const [editFood,setEditFood]=useState({name:"",cal:"",protein:"",carbs:"",fat:""});
+  const [showAddPastDay,setShowAddPastDay]=useState(false);
+  const [pastDayDate,setPastDayDate]=useState("");
+  const [pastDayFood,setPastDayFood]=useState({name:"",cal:"",protein:"",carbs:"",fat:""});
+  const [pastDayEntries,setPastDayEntries]=useState([]);
 
   // Deficit goal state
   const [defGoal,setDefGoal]=useState(null); // persisted config
@@ -1018,8 +1022,79 @@ export default function App(){
             </>
           ):(
             <>
-              <button onClick={loadHistory} style={{...btnFn(C.cyan),width:"auto",padding:"9px 20px",marginBottom:14}}>Load Logs</button>
-              {histDays.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"32px 0",lineHeight:1.8}}>Tap Load Logs to see your history.<br/>Every day you log food is saved automatically.</div>}
+              <div style={{display:"flex",gap:8,marginBottom:14}}>
+                <button onClick={loadHistory} style={{...btnFn(C.cyan),width:"auto",padding:"9px 20px"}}>Load Logs</button>
+                <button onClick={()=>{setShowAddPastDay(v=>!v);setPastDayEntries([]);setPastDayDate("");}}
+                  style={{...btnFn(C.violet),width:"auto",padding:"9px 20px"}}>
+                  {showAddPastDay?"✕ Cancel":"+ Add Past Day"}
+                </button>
+              </div>
+
+              {/* Add Past Day Form */}
+              {showAddPastDay&&(
+                <div style={{...crd,marginBottom:14,border:`1px solid ${C.violet}44`}}>
+                  <div style={{fontSize:10,color:C.violet,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Log a Past Day</div>
+
+                  {/* Date picker */}
+                  <div style={{marginBottom:10}}>
+                    <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:5}}>Select Date</div>
+                    <input type="date" max={today} value={pastDayDate} onChange={e=>setPastDayDate(e.target.value)} style={iStyle}/>
+                  </div>
+
+                  {/* Add food entries */}
+                  {pastDayDate&&(
+                    <>
+                      <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Add Food Items</div>
+                      <input placeholder="Food name" value={pastDayFood.name} onChange={e=>setPastDayFood(p=>({...p,name:e.target.value}))} style={{...iStyle,marginBottom:7}}/>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                        {[["cal","Cals"],["protein","Pro"],["carbs","Carbs"],["fat","Fat"]].map(([f,p])=>(
+                          <input key={f} type="number" placeholder={p} value={pastDayFood[f]||""} onChange={e=>setPastDayFood(prev=>({...prev,[f]:e.target.value}))} style={{...iStyle,fontSize:11}}/>
+                        ))}
+                      </div>
+                      <button onClick={()=>{
+                        if(!pastDayFood.name||!pastDayFood.cal) return;
+                        const entry={id:Date.now(),name:pastDayFood.name,cal:parseInt(pastDayFood.cal)||0,protein:parseInt(pastDayFood.protein)||0,carbs:parseInt(pastDayFood.carbs)||0,fat:parseInt(pastDayFood.fat)||0};
+                        setPastDayEntries(prev=>[...prev,entry]);
+                        setPastDayFood({name:"",cal:"",protein:"",carbs:"",fat:""});
+                      }} style={{...btnFn(C.violet),marginBottom:10}}>+ Add Item</button>
+
+                      {/* Preview entries */}
+                      {pastDayEntries.length>0&&(
+                        <div style={{marginBottom:10}}>
+                          <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>{pastDayEntries.length} items added</div>
+                          {pastDayEntries.map((e,i)=>(
+                            <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.subtle,borderRadius:8,padding:"7px 10px",marginBottom:4,border:`1px solid ${C.border}`}}>
+                              <div>
+                                <div style={{fontSize:12,fontWeight:700,color:C.text}}>{e.name}</div>
+                                <div style={{fontSize:10,color:C.muted}}><span style={{color:C.orange}}>{e.cal}cal</span>{e.protein>0&&<span> · {e.protein}g pro</span>}{e.carbs>0&&<span> · {e.carbs}g carbs</span>}{e.fat>0&&<span> · {e.fat}g fat</span>}</div>
+                              </div>
+                              <button onClick={()=>setPastDayEntries(prev=>prev.filter((_,idx)=>idx!==i))} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:13,padding:"2px 6px"}}>✕</button>
+                            </div>
+                          ))}
+                          <div style={{fontSize:10,color:C.orange,fontWeight:700,marginTop:6}}>
+                            Total: {pastDayEntries.reduce((a,e)=>a+e.cal,0)}cal · {pastDayEntries.reduce((a,e)=>a+e.protein,0)}g pro
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Save past day */}
+                      <button onClick={async()=>{
+                        if(pastDayEntries.length===0) return alert("Add at least one food item!");
+                        const existing=await sg(`fp:day:${pastDayDate}`)||[];
+                        const merged=[...existing,...pastDayEntries];
+                        await ss(`fp:day:${pastDayDate}`,merged);
+                        setShowAddPastDay(false);
+                        setPastDayEntries([]);
+                        setPastDayDate("");
+                        await loadHistory();
+                        alert(`Day saved! ${fmtDate(pastDayDate)} has been added to your logs.`);
+                      }} style={btnFn(C.green)}>💾 Save {pastDayDate?fmtDate(pastDayDate):""} to Logs</button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {histDays.length===0&&!showAddPastDay&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"32px 0",lineHeight:1.8}}>Tap Load Logs to see your history.<br/>Every day you log food is saved automatically.</div>}
               {histDays.map(day=>{
                 const pct=Math.round((day.totals.cal/(targets?.calories||1))*100);
                 const isToday=day.key===today;
