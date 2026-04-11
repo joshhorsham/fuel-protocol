@@ -217,6 +217,9 @@ export default function App(){
   const [suggestLoading,setSuggestLoading]=useState(false);
   const [streak,setStreak]=useState(0);
   const [weekData,setWeekData]=useState([]);
+  const [savedToday,setSavedToday]=useState(false);
+  const [editMode,setEditMode]=useState(false);
+  const [editFood,setEditFood]=useState({name:"",cal:"",protein:"",carbs:"",fat:""});
 
   // Deficit goal state
   const [defGoal,setDefGoal]=useState(null); // persisted config
@@ -290,93 +293,13 @@ export default function App(){
     const keys=await sl("fp:day:");
     const days=await Promise.all(keys.map(k=>k.replace("fp:day:","")).sort((a,b)=>b.localeCompare(a)).map(async k=>{
       const e=await sg(`fp:day:${k}`)||[];
-      return{key:k,entries:e,totals:sumE(e)};
-    }));
-    setHistDays(days);
-  };
-
-  const NAV = [
-  {id:"tracker",icon:"⚡",label:"Today"},
-  {id:"search",icon:"🔍",label:"Search"},// ── History ──
-  const loadHistory=async()=>{
-    const keys=await sl("fp:day:");
-    const days=await Promise.all(keys.map(k=>k.replace("fp:day:","")).sort((a,b)=>b.localeCompare(a)).map(async k=>{
-      const e=await sg(`fp:day:${k}`)||[];
-      return{key:k,entries:e,totals:sumE(e)};
+      const w=await sg(`fp:water:${k}`)||0;
+      return{key:k,entries:e,totals:sumE(e),water:w};
     }));
     setHistDays(days);
   };
 
   // ── Weekly ──
-  {id:"goals",icon:"🎯",label:"Goals"},
-  {id:"history",icon:"📅",label:"Logs"},
-  {id:"weight",icon:"📈",label:"Weight"},
-];{/* ══ HISTORY ══════════════════════════════════════════════════════════════ */}
-      {nav==="history"&&(
-        <div className="fi" style={{padding:"18px 14px"}}>
-          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
-          <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:4}}>Day Logs</div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:14}}>Every day you log food is automatically saved here</div>
-
-          {dayDetail?(
-            <>
-              <button onClick={()=>setDayDetail(null)} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:8,color:C.muted,fontSize:11,padding:"5px 11px",cursor:"pointer",marginBottom:12}}>← Back</button>
-              <div style={{fontSize:16,fontWeight:700,color:C.text,marginBottom:10}}>{fmtLong(dayDetail.key)}</div>
-              <div style={{...crd,marginBottom:10}}>
-                <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:1}}>Total Calories</div>
-                <div style={{fontSize:38,fontWeight:700,color:C.orange,lineHeight:1}}>{dayDetail.totals.cal}</div>
-                <div style={{fontSize:11,color:C.muted,marginTop:1}}>target: {targets?.calories}</div>
-                <div style={{display:"flex",gap:10,marginTop:12,justifyContent:"space-around"}}>
-                  <Ring value={dayDetail.totals.protein} max={targets?.protein||1} color={C.cyan} size={58} label={`${dayDetail.totals.protein}g`} sub="protein"/>
-                  <Ring value={dayDetail.totals.carbs} max={targets?.carbs||1} color={C.violet} size={58} label={`${dayDetail.totals.carbs}g`} sub="carbs"/>
-                  <Ring value={dayDetail.totals.fat} max={targets?.fat||1} color={C.green} size={58} label={`${dayDetail.totals.fat}g`} sub="fat"/>
-                </div>
-              </div>
-              <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:7}}>{dayDetail.entries.length} items logged</div>
-              {dayDetail.entries.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"16px 0"}}>Nothing logged this day</div>}
-              {[...dayDetail.entries].reverse().map((e,i)=>(
-                <div key={i} style={{...crd,marginBottom:6,padding:"10px 12px"}}>
-                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{e.name}</div>
-                  <div style={{fontSize:10,color:C.muted,marginTop:2}}>
-                    <span style={{color:C.orange}}>{e.cal}cal</span>
-                    {e.protein>0&&<span> · <span style={{color:C.cyan}}>{e.protein}g pro</span></span>}
-                    {e.carbs>0&&<span> · {e.carbs}g carbs</span>}
-                    {e.fat>0&&<span> · {e.fat}g fat</span>}
-                    {e.time&&<span> · {e.time}</span>}
-                  </div>
-                </div>
-              ))}
-            </>
-          ):(
-            <>
-              <button onClick={loadHistory} style={{...btnFn(C.cyan),width:"auto",padding:"8px 18px",marginBottom:12}}>Load Logs</button>
-              {histDays.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"28px 0"}}>Tap Load Logs to see your history</div>}
-              {histDays.map(day=>{
-                const pct=Math.round((day.totals.cal/(targets?.calories||1))*100);
-                return(
-                  <div key={day.key} onClick={()=>setDayDetail(day)} style={{...crd,marginBottom:8,cursor:"pointer",position:"relative",overflow:"hidden"}}>
-                    {day.key===today&&<div style={{position:"absolute",top:10,right:10,background:C.orange,borderRadius:5,fontSize:8,fontWeight:700,color:"#fff",padding:"2px 7px",letterSpacing:"0.1em"}}>TODAY</div>}
-                    <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:1}}>{fmtDate(day.key)}</div>
-                    <div style={{fontSize:10,color:C.muted,marginBottom:8}}>{day.entries.length} items · tap to view</div>
-                    <div style={{height:4,borderRadius:99,background:C.subtle,overflow:"hidden",marginBottom:7}}>
-                      <div style={{height:"100%",width:`${Math.min(pct,100)}%`,borderRadius:99,background:pct>100?C.red:C.orange,transition:"width 0.4s"}}/>
-                    </div>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10}}>
-                      <span style={{color:C.orange,fontWeight:700}}>{day.totals.cal}cal</span>
-                      <span style={{color:C.cyan}}>{day.totals.protein}g pro</span>
-                      <span style={{color:C.violet}}>{day.totals.carbs}g carbs</span>
-                      <span style={{color:C.green}}>{day.totals.fat}g fat</span>
-                      <span style={{color:pct>100?C.red:C.muted}}>{pct}%</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* ══ WEIGHT ══════════════════════════════════════════════════════════════ */}
   const loadWeekly=async()=>{
     const days=[];
     for(let i=6;i>=0;i--){
@@ -387,6 +310,14 @@ export default function App(){
       days.push({key:k,label:d.toLocaleDateString("en-AU",{weekday:"short"}),totals:sumE(e),water:w});
     }
     setWeekData(days);
+  };
+
+  // ── Save Day ──
+  const saveDay=async()=>{
+    await ss(`fp:day:${today}`,entries);
+    await ss(`fp:water:${today}`,water);
+    setSavedToday(true);
+    setTimeout(()=>setSavedToday(false),2500);
   };
 
   // ── Search ──
@@ -680,6 +611,17 @@ export default function App(){
               </div>
             ))}
           </div>
+
+          {/* Save Day */}
+          <div style={{padding:"10px 14px 16px"}}>
+            <button onClick={saveDay}
+              style={{...btnFn(savedToday?C.green:C.orange),transition:"all 0.3s"}}>
+              {savedToday?"✅ Saved!":"💾 Save Today's Log"}
+            </button>
+            <div style={{fontSize:9,color:C.muted,textAlign:"center",marginTop:6}}>
+              Saves your current entries to the 📅 Logs tab · Tomorrow starts a fresh day automatically
+            </div>
+          </div>
         </div>
       )}
 
@@ -937,6 +879,148 @@ export default function App(){
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ══ HISTORY / DAY LOGS ═══════════════════════════════════════════════════ */}
+      {nav==="history"&&(
+        <div className="fi" style={{padding:"18px 14px"}}>
+          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:4}}>Day Logs</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:14}}>Every day you log food is automatically saved here</div>
+          {dayDetail?(
+            <>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <button onClick={()=>{setDayDetail(null);setEditMode(false);}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:8,color:C.muted,fontSize:11,padding:"5px 11px",cursor:"pointer"}}>← Back</button>
+                <button onClick={()=>setEditMode(v=>!v)} style={{background:editMode?C.orange+"22":"none",border:`1px solid ${editMode?C.orange:C.border}`,borderRadius:8,color:editMode?C.orange:C.muted,fontSize:11,padding:"5px 11px",cursor:"pointer",fontWeight:editMode?700:400}}>
+                  {editMode?"✅ Done Editing":"✏️ Edit Day"}
+                </button>
+              </div>
+              <div style={{fontSize:16,fontWeight:700,color:C.text,marginBottom:10}}>{fmtLong(dayDetail.key)}</div>
+              <div style={{...crd,marginBottom:10}}>
+                <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:2}}>Total Calories</div>
+                <div style={{fontSize:38,fontWeight:700,color:C.orange,lineHeight:1}}>{dayDetail.totals.cal}</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:2}}>target: {targets?.calories} · {Math.round((dayDetail.totals.cal/(targets?.calories||1))*100)}% of goal</div>
+                <div style={{height:5,borderRadius:99,background:C.subtle,overflow:"hidden",marginTop:8,marginBottom:12}}>
+                  <div style={{height:"100%",width:`${Math.min((dayDetail.totals.cal/(targets?.calories||1))*100,100)}%`,borderRadius:99,background:dayDetail.totals.cal>(targets?.calories||0)?C.red:C.orange}}/>
+                </div>
+                <div style={{display:"flex",gap:10,justifyContent:"space-around"}}>
+                  <Ring value={dayDetail.totals.protein} max={targets?.protein||1} color={C.cyan} size={62} label={`${dayDetail.totals.protein}g`} sub="protein"/>
+                  <Ring value={dayDetail.totals.carbs} max={targets?.carbs||1} color={C.violet} size={62} label={`${dayDetail.totals.carbs}g`} sub="carbs"/>
+                  <Ring value={dayDetail.totals.fat} max={targets?.fat||1} color={C.green} size={62} label={`${dayDetail.totals.fat}g`} sub="fat"/>
+                </div>
+                {/* Water summary */}
+                <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:16}}>💧</span>
+                    <div>
+                      <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em"}}>Water</div>
+                      <div style={{fontSize:16,fontWeight:700,color:C.cyan}}>{Math.round((dayDetail.water||0)/100)/10}L <span style={{fontSize:10,color:C.muted,fontWeight:400}}>/ {WATER_GOAL/1000}L</span></div>
+                    </div>
+                  </div>
+                  <div style={{height:6,borderRadius:99,background:C.subtle,overflow:"hidden",flex:1,marginLeft:12}}>
+                    <div style={{height:"100%",width:`${Math.min(((dayDetail.water||0)/WATER_GOAL)*100,100)}%`,borderRadius:99,background:C.cyan,transition:"width 0.4s"}}/>
+                  </div>
+                </div>
+                {/* Edit water in edit mode */}
+                {editMode&&(
+                  <div style={{marginTop:10}}>
+                    <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Edit Water Intake</div>
+                    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                      {[150,250,500].map(ml=>(
+                        <button key={ml} onClick={async()=>{
+                          const updated=(dayDetail.water||0)+ml;
+                          await ss(`fp:water:${dayDetail.key}`,updated);
+                          setDayDetail({...dayDetail,water:updated});
+                        }} style={{...chipFn(false,C.cyan),padding:"6px 10px",fontSize:10}}>+{ml}ml</button>
+                      ))}
+                      <button onClick={async()=>{
+                        const updated=Math.max(0,(dayDetail.water||0)-250);
+                        await ss(`fp:water:${dayDetail.key}`,updated);
+                        setDayDetail({...dayDetail,water:updated});
+                      }} style={{...chipFn(false,C.muted),padding:"6px 10px",fontSize:10}}>−250ml</button>
+                      <button onClick={async()=>{
+                        await ss(`fp:water:${dayDetail.key}`,0);
+                        setDayDetail({...dayDetail,water:0});
+                      }} style={{...chipFn(false,C.red),padding:"6px 10px",fontSize:10}}>Reset</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Add food in edit mode */}
+              {editMode&&(
+                <div style={{...crd,marginBottom:10,border:`1px solid ${C.orange}44`}}>
+                  <div style={{fontSize:10,color:C.orange,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Add Food to This Day</div>
+                  <input placeholder="Food name" value={editFood.name} onChange={e=>setEditFood(p=>({...p,name:e.target.value}))} style={{...iStyle,marginBottom:7}}/>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                    {[["cal","Cals"],["protein","Pro"],["carbs","Carbs"],["fat","Fat"]].map(([f,p])=>(
+                      <input key={f} type="number" placeholder={p} value={editFood[f]} onChange={e=>setEditFood(prev=>({...prev,[f]:e.target.value}))} style={{...iStyle,fontSize:11}}/>
+                    ))}
+                  </div>
+                  <button onClick={async()=>{
+                    if(!editFood.name||!editFood.cal) return;
+                    const newEntry={id:Date.now(),name:editFood.name,cal:parseInt(editFood.cal)||0,protein:parseInt(editFood.protein)||0,carbs:parseInt(editFood.carbs)||0,fat:parseInt(editFood.fat)||0,time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})};
+                    const updated=[...dayDetail.entries,newEntry];
+                    await ss(`fp:day:${dayDetail.key}`,updated);
+                    setDayDetail({...dayDetail,entries:updated,totals:sumE(updated)});
+                    setEditFood({name:"",cal:"",protein:"",carbs:"",fat:""});
+                  }} style={btnFn()}>+ Add to This Day</button>
+                </div>
+              )}
+
+              <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>{dayDetail.entries.length} items logged</div>
+              {dayDetail.entries.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"16px 0"}}>Nothing logged this day</div>}
+              {[...dayDetail.entries].map((e,i)=>(
+                <div key={i} style={{...crd,marginBottom:6,padding:"10px 12px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{e.name}</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:2}}>
+                        <span style={{color:C.orange,fontWeight:700}}>{e.cal}cal</span>
+                        {e.protein>0&&<span> · <span style={{color:C.cyan}}>{e.protein}g pro</span></span>}
+                        {e.carbs>0&&<span> · <span style={{color:C.violet}}>{e.carbs}g carbs</span></span>}
+                        {e.fat>0&&<span> · <span style={{color:C.green}}>{e.fat}g fat</span></span>}
+                        {e.time&&<span style={{color:C.muted}}> · {e.time}</span>}
+                      </div>
+                    </div>
+                    {editMode&&<button onClick={async()=>{
+                      const updated=dayDetail.entries.filter((_,idx)=>idx!==i);
+                      await ss(`fp:day:${dayDetail.key}`,updated);
+                      setDayDetail({...dayDetail,entries:updated,totals:sumE(updated)});
+                    }} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,color:C.red,fontSize:12,padding:"3px 8px",cursor:"pointer",marginLeft:8,flexShrink:0}}>✕</button>}
+                  </div>
+                </div>
+              ))}
+            </>
+          ):(
+            <>
+              <button onClick={loadHistory} style={{...btnFn(C.cyan),width:"auto",padding:"9px 20px",marginBottom:14}}>Load Logs</button>
+              {histDays.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"32px 0",lineHeight:1.8}}>Tap Load Logs to see your history.<br/>Every day you log food is saved automatically.</div>}
+              {histDays.map(day=>{
+                const pct=Math.round((day.totals.cal/(targets?.calories||1))*100);
+                const isToday=day.key===today;
+                return(
+                  <div key={day.key} onClick={()=>setDayDetail(day)} style={{...crd,marginBottom:8,cursor:"pointer",position:"relative",overflow:"hidden"}}>
+                    {isToday&&<div style={{position:"absolute",top:10,right:10,background:C.orange,borderRadius:5,fontSize:8,fontWeight:700,color:"#fff",padding:"2px 7px",letterSpacing:"0.1em"}}>TODAY</div>}
+                    <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:1}}>{fmtDate(day.key)}</div>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:8}}>{day.entries.length} items · tap to view</div>
+                    <div style={{height:4,borderRadius:99,background:C.subtle,overflow:"hidden",marginBottom:7}}>
+                      <div style={{height:"100%",width:`${Math.min(pct,100)}%`,borderRadius:99,background:pct>100?C.red:C.orange,transition:"width 0.4s"}}/>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,flexWrap:"wrap",gap:4}}>
+                      <span style={{color:C.orange,fontWeight:700}}>{day.totals.cal}cal</span>
+                      <span style={{color:C.cyan}}>{day.totals.protein}g pro</span>
+                      <span style={{color:C.violet}}>{day.totals.carbs}g carbs</span>
+                      <span style={{color:C.green}}>{day.totals.fat}g fat</span>
+                      <span style={{color:C.cyan}}>💧{Math.round((day.water||0)/100)/10}L</span>
+                      <span style={{color:pct>100?C.red:C.muted}}>{pct}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
         </div>
       )}
 
