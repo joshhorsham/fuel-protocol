@@ -56,9 +56,9 @@ const sumE=(arr=[])=>arr.reduce((a,e)=>({cal:a.cal+(e.cal||0),protein:a.protein+
 const minDate=()=>{ const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); };
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
-const sg=async(k)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}};
-const ss=async(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
-const sl=async(p)=>{try{const keys=Object.keys(localStorage).filter(k=>k.startsWith(p));return keys;}catch{return[];}};
+const sg=async(k)=>{try{const r=await window.storage.get(k);return r?JSON.parse(r.value):null;}catch{return null;}};
+const ss=async(k,v)=>{try{await window.storage.set(k,JSON.stringify(v));}catch{}};
+const sl=async(p)=>{try{const r=await window.storage.list(p);return r?.keys||[];}catch{return[];}};
 
 // ─── AI ───────────────────────────────────────────────────────────────────────
 async function aiCall(prompt,sys){
@@ -81,12 +81,12 @@ async function getMeals(rem,tgt){
 }
 
 // ─── Design ───────────────────────────────────────────────────────────────────
-const C={bg:"#060a0f",surface:"#0d1117",card:"#111820",border:"#1c2a38",orange:"#ff6b2b",cyan:"#00d4ff",violet:"#7c5cfc",green:"#00e5a0",red:"#ff4757",yellow:"#fbbf24",text:"#e8f0f8",muted:"#4a6078",subtle:"#1e2d3d"};
+const C={bg:"#07090f",surface:"#0e1118",card:"#131a24",border:"#1e2d3f",orange:"#ff6b2b",orangeLight:"#ff8c5a",cyan:"#00d4ff",violet:"#7c5cfc",green:"#00e5a0",red:"#ff4757",yellow:"#fbbf24",text:"#edf2f8",muted:"#4a6078",subtle:"#172030"};
 const pStyle={minHeight:"100vh",background:C.bg,fontFamily:"'DM Mono',monospace",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:82};
-const crd={background:C.card,borderRadius:16,border:`1px solid ${C.border}`,padding:"14px"};
+const crd={background:C.card,borderRadius:18,border:`1px solid ${C.border}`,padding:"15px",boxShadow:"0 4px 24px rgba(0,0,0,0.3)"};
 const iStyle={background:C.subtle,border:`1px solid ${C.border}`,borderRadius:10,color:C.text,padding:"10px 12px",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"'DM Mono',monospace"};
-const chipFn=(on,col=C.orange)=>({border:"none",borderRadius:8,padding:"7px 6px",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700,background:on?col:C.subtle,color:on?"#fff":C.muted,transition:"all 0.15s",letterSpacing:"0.03em"});
-const btnFn=(col=C.orange)=>({background:`linear-gradient(135deg,${col},${col}cc)`,border:"none",borderRadius:12,color:"#fff",padding:"11px 18px",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%",fontFamily:"'DM Mono',monospace",letterSpacing:"0.04em"});
+const chipFn=(on,col=C.orange)=>({border:`1px solid ${on?col:C.border}`,borderRadius:9,padding:"8px 6px",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700,background:on?col+"22":C.subtle,color:on?col:C.muted,transition:"all 0.15s",letterSpacing:"0.03em"});
+const btnFn=(col=C.orange)=>({background:`linear-gradient(135deg,${col},${col}bb)`,border:"none",borderRadius:13,color:"#fff",padding:"13px 18px",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%",fontFamily:"'DM Mono',monospace",letterSpacing:"0.05em",boxShadow:`0 4px 20px ${col}44`});
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function Ring({value,max,color,size=68,stroke=6,label,sub}){
@@ -337,12 +337,15 @@ export default function App(){
   const STYLES=`
     @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
     @keyframes spin{to{transform:rotate(360deg)}}
-    @keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
-    .fi{animation:fi 0.2s ease forwards}
-    input::placeholder{color:#4a6078}
+    @keyframes fi{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.6}}
+    .fi{animation:fi 0.25s ease forwards}
+    input::placeholder{color:#3a5068}
+    input:focus{border-color:#ff6b2b88 !important;box-shadow:0 0 0 3px #ff6b2b11}
     input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
     input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.4)}
-    ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:${C.bg}} ::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px}
+    ::-webkit-scrollbar{width:3px} ::-webkit-scrollbar-track{background:${C.bg}} ::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px}
+    button:active{transform:scale(0.97)}
   `;
 
   // ─── Loading ──────────────────────────────────────────────────────────────
@@ -357,32 +360,48 @@ export default function App(){
   if(screen==="setup") return(
     <div style={pStyle}>
       <style>{STYLES}</style>
-      <div style={{padding:20}}>
-        <div style={{marginBottom:28,paddingTop:20}}>
-          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:8}}>FUEL PROTOCOL</div>
-          <div style={{fontSize:28,fontWeight:700,color:C.text,lineHeight:1.15}}>Set your<br/><span style={{color:C.orange}}>targets</span></div>
+      <div style={{padding:"24px 20px"}}>
+        <div style={{marginBottom:32,paddingTop:24,textAlign:"center"}}>
+          <div style={{display:"inline-block",background:"linear-gradient(135deg,#ff6b2b22,#7c5cfc22)",border:"1px solid #ff6b2b44",borderRadius:14,padding:"6px 16px",fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:14}}>FUEL PROTOCOL</div>
+          <div style={{fontSize:32,fontWeight:700,color:C.text,lineHeight:1.1,marginBottom:8}}>Set your<br/><span style={{color:C.orange}}>targets</span></div>
+          <div style={{fontSize:11,color:C.muted}}>Enter your details to calculate daily calorie and macro targets</div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-          {[["weight","Weight (kg)","number"],["height","Height (cm)","number"],["age","Age","number"]].map(([f,p,t])=>(
+
+        <div style={{marginBottom:6,fontSize:9,color:C.muted,fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase"}}>Body Stats</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+          {[["weight","Weight (kg)","number"],["height","Height (cm)","number"],["age","Age (years)","number"]].map(([f,p,t])=>(
             <input key={f} type={t} placeholder={p} value={stats[f]} onChange={e=>setStats(s=>({...s,[f]:e.target.value}))} style={{...iStyle,gridColumn:f==="age"?"1 / -1":undefined}}/>
           ))}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+
+        <div style={{marginBottom:6,fontSize:9,color:C.muted,fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase"}}>Biological Sex</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
           {[["male","♂ Male"],["female","♀ Female"]].map(([v,l])=>(
-            <button key={v} onClick={()=>setStats(s=>({...s,sex:v}))} style={chipFn(stats.sex===v)}>{l}</button>
+            <button key={v} onClick={()=>setStats(s=>({...s,sex:v}))} style={{...chipFn(stats.sex===v),padding:"11px 6px",fontSize:11}}>{l}</button>
           ))}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-          {[["sedentary","Sedentary"],["light","Light"],["moderate","Moderate"],["active","Very Active"]].map(([v,l])=>(
-            <button key={v} onClick={()=>setStats(s=>({...s,activity:v}))} style={chipFn(stats.activity===v,C.cyan)}>{l}</button>
+
+        <div style={{marginBottom:6,fontSize:9,color:C.muted,fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase"}}>Activity Level</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+          {[["sedentary","🪑 Sedentary","Desk job, little exercise"],["light","🚶 Light","1-3 days/week"],["moderate","🏃 Moderate","3-5 days/week"],["active","💪 Very Active","6-7 days/week"]].map(([v,l,sub])=>(
+            <button key={v} onClick={()=>setStats(s=>({...s,activity:v}))} style={{...chipFn(stats.activity===v,C.cyan),padding:"10px 8px",textAlign:"left"}}>
+              <div style={{fontSize:11}}>{l}</div>
+              <div style={{fontSize:8,opacity:0.7,marginTop:2,fontWeight:400}}>{sub}</div>
+            </button>
           ))}
         </div>
+
+        <div style={{marginBottom:6,fontSize:9,color:C.muted,fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase"}}>Your Goal</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:28}}>
-          {[["lose","🔥 Lose"],["lose-muscle","💪 Lose+Build"],["maintain","⚖️ Maintain"]].map(([v,l])=>(
-            <button key={v} onClick={()=>setStats(s=>({...s,goal:v}))} style={chipFn(stats.goal===v,C.violet)}>{l}</button>
+          {[["lose","🔥","Lose Weight"],["lose-muscle","💪","Lose + Build"],["maintain","⚖️","Maintain"]].map(([v,icon,l])=>(
+            <button key={v} onClick={()=>setStats(s=>({...s,goal:v}))} style={{...chipFn(stats.goal===v,C.violet),padding:"12px 6px",textAlign:"center"}}>
+              <div style={{fontSize:18,marginBottom:4}}>{icon}</div>
+              <div style={{fontSize:9}}>{l}</div>
+            </button>
           ))}
         </div>
-        <button onClick={handleSetup} style={btnFn()}>Calculate & Start →</button>
+
+        <button onClick={handleSetup} style={btnFn()}>Calculate My Targets →</button>
       </div>
     </div>
   );
@@ -829,12 +848,9 @@ export default function App(){
           <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:7}}>All Entries</div>
           {wLog.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"20px 0"}}>No weight entries yet</div>}
           {[...wLog].reverse().map((w,i)=>(
-            <div key={i} style={{...crd,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px"}}>
+            <div key={i} style={{...crd,marginBottom:6,display:"flex",justifyContent:"space-between",padding:"10px 12px"}}>
               <span style={{fontSize:12,color:C.muted}}>{fmtDate(w.date)}</span>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:14,fontWeight:700,color:C.orange}}>{w.kg} kg</span>
-                <button onClick={async()=>{const updated=wLog.filter((_,idx)=>idx!==(wLog.length-1-i));setWLog(updated);await ss("fp:weights",updated);}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,color:C.red,fontSize:11,padding:"3px 8px",cursor:"pointer"}}>✕</button>
-              </div>
+              <span style={{fontSize:14,fontWeight:700,color:C.orange}}>{w.kg} kg</span>
             </div>
           ))}
         </div>
