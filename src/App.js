@@ -829,9 +829,12 @@ export default function App(){
           <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:7}}>All Entries</div>
           {wLog.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"20px 0"}}>No weight entries yet</div>}
           {[...wLog].reverse().map((w,i)=>(
-            <div key={i} style={{...crd,marginBottom:6,display:"flex",justifyContent:"space-between",padding:"10px 12px"}}>
+            <div key={i} style={{...crd,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px"}}>
               <span style={{fontSize:12,color:C.muted}}>{fmtDate(w.date)}</span>
-              <span style={{fontSize:14,fontWeight:700,color:C.orange}}>{w.kg} kg</span>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:14,fontWeight:700,color:C.orange}}>{w.kg} kg</span>
+                <button onClick={async()=>{const updated=wLog.filter((_,idx)=>idx!==(wLog.length-1-i));setWLog(updated);await ss("fp:weights",updated);}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,color:C.red,fontSize:11,padding:"3px 8px",cursor:"pointer"}}>✕</button>
+              </div>
             </div>
           ))}
         </div>
