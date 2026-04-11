@@ -26,17 +26,11 @@ function calcTargets(s) {
 }
 
 // Given a deficitGoal config + TDEE, return derived numbers
-async function aiCall(prompt,sys){
-  try {
-    const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:[{role:"user",content:prompt}]})});
-    const d=await res.json();
-    console.log("API response:", d);
-    return d.content?.map(b=>b.text||"").join("")||"";
-  } catch(e) {
-    console.error("API error:", e);
-    return "";
-  }
-}
+function resolveGoal(dg, tdee) {
+  if(!dg||!tdee) return null;
+  if(dg.mode==="rate") {
+    const dailyDeficit=Math.round((parseFloat(dg.kgPerWeek)||0)*7700/7);
+    const calsPerDay=tdee-dailyDeficit;
     const weeksTo=dg.targetKg&&dailyDeficit>0 ? +((parseFloat(dg.targetKg)*7700)/(dailyDeficit*7)).toFixed(1) : null;
     const daysTo=weeksTo?Math.round(weeksTo*7):null;
     const arrivalDate=daysTo ? (() => { const d=new Date(); d.setDate(d.getDate()+daysTo); return d.toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"numeric"}); })() : null;
@@ -68,9 +62,14 @@ const sl=async(p)=>{try{const r=await window.storage.list(p);return r?.keys||[];
 
 // ─── AI ───────────────────────────────────────────────────────────────────────
 async function aiCall(prompt,sys){
-  const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:[{role:"user",content:prompt}]})});
-  const d=await res.json();
-  return d.content?.map(b=>b.text||"").join("")||"";
+  try {
+    const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:[{role:"user",content:prompt}]})});
+    const d=await res.json();
+    return d.content?.map(b=>b.text||"").join("")||"";
+  } catch(e) {
+    console.error("API error:",e);
+    return "";
+  }
 }
 async function searchFood(q){
   const raw=await aiCall(`Nutritional info for: "${q}". Focus on Australian products (Coles, Woolworths, Aldi) and Australian fast food/Uber Eats. Return ONLY a JSON array of up to 6 results: [{"name":"...","brand":"...","serving":"...","cal":0,"protein":0,"carbs":0,"fat":0}]. Integers only. No markdown.`,"You are a nutrition database. Return only valid JSON arrays. No markdown fences, no explanation.");
