@@ -1,0 +1,1005 @@
+import { useState, useEffect } from "react";
+
+const ACTIVITY_MULTIPLIERS = { sedentary:1.2, light:1.375, moderate:1.55, active:1.725 };
+const GOAL_DEFICITS = { lose:500, "lose-muscle":300, maintain:0 };
+const PROTEIN_GOALS = { lose:1.6, "lose-muscle":2.0, maintain:1.4 };
+const WATER_GOAL = 2500;
+const NAV = [
+  {id:"tracker",icon:"⚡",label:"Today"},
+  {id:"search",icon:"🔍",label:"Search"},
+  {id:"goals",icon:"🎯",label:"Goals"},
+  {id:"weight",icon:"📈",label:"Weight"},
+  {id:"weekly",icon:"📊",label:"Weekly"},
+];
+
+// ─── Math helpers ─────────────────────────────────────────────────────────────
+function calcTargets(s) {
+  const w=parseFloat(s.weight),h=parseFloat(s.height),a=parseFloat(s.age);
+  if(!w||!h||!a) return null;
+  const bmr=s.sex==="male"?10*w+6.25*h-5*a+5:10*w+6.25*h-5*a-161;
+  const tdee=bmr*(ACTIVITY_MULTIPLIERS[s.activity]||1.375);
+  const calories=Math.round(tdee-(GOAL_DEFICITS[s.goal]||500));
+  const protein=Math.round(w*(PROTEIN_GOALS[s.goal]||1.6));
+  const fat=Math.round((calories*0.25)/9);
+  const carbs=Math.round((calories-protein*4-fat*9)/4);
+  return {calories,protein,fat,carbs,tdee:Math.round(tdee)};
+}
+
+// Given a deficitGoal config + TDEE, return derived numbers
+function resolveGoal(dg, tdee) {
+  if(!dg||!tdee) return null;
+  if(dg.mode==="rate") {
+    const dailyDeficit=Math.round((parseFloat(dg.kgPerWeek)||0)*7700/7);
+    const calsPerDay=tdee-dailyDeficit;
+    const weeksTo=dg.targetKg&&dailyDeficit>0 ? +((parseFloat(dg.targetKg)*7700)/(dailyDeficit*7)).toFixed(1) : null;
+    const daysTo=weeksTo?Math.round(weeksTo*7):null;
+    const arrivalDate=daysTo ? (() => { const d=new Date(); d.setDate(d.getDate()+daysTo); return d.toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"numeric"}); })() : null;
+    return { dailyDeficit, calsPerDay, kgPerWeek:parseFloat(dg.kgPerWeek)||0, daysLeft:null, totalKg:parseFloat(dg.targetKg)||null, weeksTo, arrivalDate };
+  }
+  if(dg.mode==="date") {
+    const now=new Date(); now.setHours(0,0,0,0);
+    const target=new Date((dg.targetDate||todayKey())+"T00:00:00");
+    const daysLeft=Math.max(1,Math.round((target-now)/(86400000)));
+    const totalKcal=(parseFloat(dg.targetKg)||0)*7700;
+    const dailyDeficit=Math.round(totalKcal/daysLeft);
+    const calsPerDay=tdee-dailyDeficit;
+    const kgPerWeek=+((dailyDeficit*7)/7700).toFixed(2);
+    return { dailyDeficit, calsPerDay, kgPerWeek, daysLeft, totalKg:parseFloat(dg.targetKg)||0, weeksTo:null, arrivalDate:dg.targetDate };
+  }
+  return null;
+}
+
+const todayKey=()=>new Date().toISOString().slice(0,10);
+const fmtDate=(k)=>new Date(k+"T12:00:00").toLocaleDateString("en-AU",{weekday:"short",month:"short",day:"numeric"});
+const fmtLong=(k)=>new Date(k+"T12:00:00").toLocaleDateString("en-AU",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
+const sumE=(arr=[])=>arr.reduce((a,e)=>({cal:a.cal+(e.cal||0),protein:a.protein+(e.protein||0),carbs:a.carbs+(e.carbs||0),fat:a.fat+(e.fat||0)}),{cal:0,protein:0,carbs:0,fat:0});
+const minDate=()=>{ const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); };
+
+// ─── Storage ──────────────────────────────────────────────────────────────────
+const sg=async(k)=>{try{const r=await window.storage.get(k);return r?JSON.parse(r.value):null;}catch{return null;}};
+const ss=async(k,v)=>{try{await window.storage.set(k,JSON.stringify(v));}catch{}};
+const sl=async(p)=>{try{const r=await window.storage.list(p);return r?.keys||[];}catch{return[];}};
+
+// ─── AI ───────────────────────────────────────────────────────────────────────
+async function aiCall(prompt,sys){
+  const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:[{role:"user",content:prompt}]})});
+  const d=await res.json();
+  return d.content?.map(b=>b.text||"").join("")||"";
+}
+async function searchFood(q){
+  const raw=await aiCall(`Nutritional info for: "${q}". Focus on Australian products (Coles, Woolworths, Aldi) and Australian fast food/Uber Eats. Return ONLY a JSON array of up to 6 results: [{"name":"...","brand":"...","serving":"...","cal":0,"protein":0,"carbs":0,"fat":0}]. Integers only. No markdown.`,"You are a nutrition database. Return only valid JSON arrays. No markdown fences, no explanation.");
+  try{return JSON.parse(raw.replace(/```json|```/g,"").trim());}catch{return[];}
+}
+async function getMeals(rem,tgt){
+  const raw=await aiCall(`Remaining macros today: ${rem.cal}cal, ${rem.protein}g protein, ${rem.carbs}g carbs, ${rem.fat}g fat. Daily targets: ${tgt.calories}cal, ${tgt.protein}g protein. Suggest 4 practical Australian meal/snack ideas (Coles, Woolworths, Aldi, fast food). Return ONLY JSON: [{"name":"...","description":"...","cal":0,"protein":0,"carbs":0,"fat":0,"tip":"..."}]. Integers. No markdown.`,"You are a nutrition coach. Return only valid JSON arrays. No markdown fences.");
+  try{return JSON.parse(raw.replace(/```json|```/g,"").trim());}catch{return[];}
+}
+
+// ─── Design ───────────────────────────────────────────────────────────────────
+const C={bg:"#060a0f",surface:"#0d1117",card:"#111820",border:"#1c2a38",orange:"#ff6b2b",cyan:"#00d4ff",violet:"#7c5cfc",green:"#00e5a0",red:"#ff4757",yellow:"#fbbf24",text:"#e8f0f8",muted:"#4a6078",subtle:"#1e2d3d"};
+const pStyle={minHeight:"100vh",background:C.bg,fontFamily:"'DM Mono',monospace",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:82};
+const crd={background:C.card,borderRadius:16,border:`1px solid ${C.border}`,padding:"14px"};
+const iStyle={background:C.subtle,border:`1px solid ${C.border}`,borderRadius:10,color:C.text,padding:"10px 12px",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"'DM Mono',monospace"};
+const chipFn=(on,col=C.orange)=>({border:"none",borderRadius:8,padding:"7px 6px",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700,background:on?col:C.subtle,color:on?"#fff":C.muted,transition:"all 0.15s",letterSpacing:"0.03em"});
+const btnFn=(col=C.orange)=>({background:`linear-gradient(135deg,${col},${col}cc)`,border:"none",borderRadius:12,color:"#fff",padding:"11px 18px",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%",fontFamily:"'DM Mono',monospace",letterSpacing:"0.04em"});
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+function Ring({value,max,color,size=68,stroke=6,label,sub}){
+  const r=(size-stroke)/2,circ=2*Math.PI*r,dash=Math.min(value/(max||1),1)*circ;
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+      <svg width={size} height={size} style={{transform:"rotate(-90deg)"}}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.subtle} strokeWidth={stroke}/>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" style={{transition:"stroke-dasharray 0.5s ease"}}/>
+      </svg>
+      <div style={{textAlign:"center",marginTop:-2}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.text}}>{label}</div>
+        <div style={{fontSize:10,color:C.muted}}>{sub}</div>
+      </div>
+    </div>
+  );
+}
+
+function Bar({label,current,max,color}){
+  const pct=Math.min((current/(max||1))*100,100),over=current>max;
+  return(
+    <div style={{marginBottom:9}}>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:3}}>
+        <span style={{fontSize:11,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase"}}>{label}</span>
+        <span style={{fontSize:11,color:over?C.red:C.text}}>{current}g / {max}g</span>
+      </div>
+      <div style={{height:5,borderRadius:99,background:C.subtle,overflow:"hidden"}}>
+        <div style={{height:"100%",width:`${pct}%`,borderRadius:99,background:over?C.red:color,transition:"width 0.4s"}}/>
+      </div>
+    </div>
+  );
+}
+
+function WaterRing({ml}){
+  const pct=Math.min(ml/WATER_GOAL,1),size=86,stroke=7,r=(size-stroke)/2,circ=2*Math.PI*r,dash=pct*circ;
+  return(
+    <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
+      <svg width={size} height={size} style={{transform:"rotate(-90deg)",position:"absolute"}}>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.subtle} strokeWidth={stroke}/>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.cyan} strokeWidth={stroke} strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" style={{transition:"stroke-dasharray 0.5s"}}/>
+      </svg>
+      <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+        <div style={{fontSize:14,fontWeight:700,color:C.cyan}}>{Math.round(ml/100)/10}L</div>
+        <div style={{fontSize:9,color:C.muted}}>/{WATER_GOAL/1000}L</div>
+      </div>
+    </div>
+  );
+}
+
+// Radial progress for Goals tab
+function GoalRing({pct,color,size=110,stroke=9,label,sub}){
+  const r=(size-stroke)/2,circ=2*Math.PI*r,dash=Math.min(pct/100,1)*circ;
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+      <div style={{position:"relative",width:size,height:size}}>
+        <svg width={size} height={size} style={{transform:"rotate(-90deg)",position:"absolute"}}>
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.subtle} strokeWidth={stroke}/>
+          <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={pct>100?C.red:color} strokeWidth={stroke} strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" style={{transition:"stroke-dasharray 0.6s ease"}}/>
+        </svg>
+        <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+          <div style={{fontSize:18,fontWeight:700,color:pct>100?C.red:color}}>{Math.round(pct)}%</div>
+          <div style={{fontSize:9,color:C.muted}}>of goal</div>
+        </div>
+      </div>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.text}}>{label}</div>
+        {sub&&<div style={{fontSize:10,color:C.muted}}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
+
+function Spin({col=C.orange}){
+  return <span style={{display:"inline-block",width:14,height:14,border:`2px solid ${col}33`,borderTop:`2px solid ${col}`,borderRadius:"50%",animation:"spin 0.7s linear infinite",verticalAlign:"middle"}}/>;
+}
+
+function NavBar({active,onChange}){
+  return(
+    <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:C.surface,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:100}}>
+      {NAV.map(n=>(
+        <button key={n.id} onClick={()=>onChange(n.id)} style={{flex:1,background:"none",border:"none",padding:"9px 2px 11px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+          <span style={{fontSize:17}}>{n.icon}</span>
+          <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",color:active===n.id?C.orange:C.muted,textTransform:"uppercase"}}>{n.label}</span>
+          {active===n.id&&<div style={{width:14,height:2,borderRadius:1,background:C.orange}}/>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── Stat tile ────────────────────────────────────────────────────────────────
+function Tile({label,value,sub,color=C.text}){
+  return(
+    <div style={{background:C.subtle,borderRadius:12,padding:"10px 11px",border:`1px solid ${C.border}`}}>
+      <div style={{fontSize:8,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{label}</div>
+      <div style={{fontSize:14,fontWeight:700,color}}>{value}</div>
+      {sub&&<div style={{fontSize:9,color:C.muted,marginTop:1}}>{sub}</div>}
+    </div>
+  );
+}
+
+// ─── Safety check ─────────────────────────────────────────────────────────────
+function safetyLabel(calsPerDay){
+  if(calsPerDay<1000) return {text:"⚠️ Below safe minimum (1000 kcal). Consider a smaller deficit.",color:C.red};
+  if(calsPerDay<1200) return {text:"⚠️ Very aggressive — consult a health professional.",color:C.yellow};
+  return null;
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+export default function App(){
+  const [screen,setScreen]=useState("loading");
+  const [nav,setNav]=useState("tracker");
+  const [stats,setStats]=useState({weight:"",height:"",age:"",sex:"male",activity:"moderate",goal:"lose"});
+  const [targets,setTargets]=useState(null);
+  const [entries,setEntries]=useState([]);
+  const [water,setWater]=useState(0);
+  const [newFood,setNewFood]=useState({name:"",cal:"",protein:"",carbs:"",fat:""});
+  const [templates,setTemplates]=useState([]);
+  const [showTpl,setShowTpl]=useState(false);
+  const [histDays,setHistDays]=useState([]);
+  const [dayDetail,setDayDetail]=useState(null);
+  const [wLog,setWLog]=useState([]);
+  const [newW,setNewW]=useState("");
+  const [searchQ,setSearchQ]=useState("");
+  const [searchR,setSearchR]=useState([]);
+  const [searchLoading,setSearchLoading]=useState(false);
+  const [suggestions,setSuggestions]=useState([]);
+  const [suggestLoading,setSuggestLoading]=useState(false);
+  const [streak,setStreak]=useState(0);
+  const [weekData,setWeekData]=useState([]);
+
+  // Deficit goal state
+  const [defGoal,setDefGoal]=useState(null); // persisted config
+  const [dgDraft,setDgDraft]=useState({mode:"rate",kgPerWeek:"0.5",targetKg:"",targetDate:""}); // editing draft
+
+  const today=todayKey();
+
+  // ── Boot ──
+  useEffect(()=>{
+    (async()=>{
+      const cfg=await sg("fp:settings");
+      if(cfg){setStats(cfg.stats);setTargets(cfg.targets);}
+      const e=await sg(`fp:day:${today}`)||[];
+      const w=await sg(`fp:water:${today}`)||0;
+      const t=await sg("fp:templates")||[];
+      const wl=await sg("fp:weights")||[];
+      const dg=await sg("fp:deficitgoal");
+      setEntries(e);setWater(w);setTemplates(t);setWLog(wl);
+      if(dg){setDefGoal(dg);setDgDraft(dg);}
+      let s=0,d=new Date();
+      for(let i=0;i<365;i++){
+        const k=d.toISOString().slice(0,10);
+        const de=await sg(`fp:day:${k}`)||[];
+        if(de.length===0&&k!==today)break;
+        if(de.length>0)s++;
+        d.setDate(d.getDate()-1);
+      }
+      setStreak(s);
+      setScreen(cfg?"main":"setup");
+    })();
+  },[]);
+
+  // ── Persist helpers ──
+  const saveEntries=async(e)=>{setEntries(e);await ss(`fp:day:${today}`,e);};
+  const saveWater=async(w)=>{setWater(w);await ss(`fp:water:${today}`,w);};
+  const saveDefGoal=async(dg)=>{setDefGoal(dg);await ss("fp:deficitgoal",dg);};
+
+  // ── Setup ──
+  const handleSetup=async()=>{
+    const t=calcTargets(stats);
+    if(!t)return alert("Please fill in all fields.");
+    await ss("fp:settings",{stats,targets:t});
+    setTargets(t);setScreen("main");
+  };
+
+  // ── Food ──
+  const addFood=async(item)=>{
+    const e=[...entries,{id:Date.now(),...item,time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}];
+    await saveEntries(e);
+  };
+  const removeFood=async(id)=>await saveEntries(entries.filter(e=>e.id!==id));
+  const addFromForm=async()=>{
+    if(!newFood.name||!newFood.cal)return;
+    await addFood({name:newFood.name,cal:parseInt(newFood.cal)||0,protein:parseInt(newFood.protein)||0,carbs:parseInt(newFood.carbs)||0,fat:parseInt(newFood.fat)||0});
+    setNewFood({name:"",cal:"",protein:"",carbs:"",fat:""});
+  };
+
+  // ── Templates ──
+  const saveTpl=async(item)=>{const t=[...templates,{id:Date.now(),name:item.name,cal:item.cal,protein:item.protein,carbs:item.carbs,fat:item.fat}];setTemplates(t);await ss("fp:templates",t);};
+  const removeTpl=async(id)=>{const t=templates.filter(x=>x.id!==id);setTemplates(t);await ss("fp:templates",t);};
+
+  // ── Weight ──
+  const logWeight=async()=>{
+    if(!newW)return;
+    const wl=[...wLog,{date:today,kg:parseFloat(newW)}].sort((a,b)=>a.date.localeCompare(b.date));
+    setWLog(wl);await ss("fp:weights",wl);setNewW("");
+  };
+
+  // ── History ──
+  const loadHistory=async()=>{
+    const keys=await sl("fp:day:");
+    const days=await Promise.all(keys.map(k=>k.replace("fp:day:","")).sort((a,b)=>b.localeCompare(a)).map(async k=>{
+      const e=await sg(`fp:day:${k}`)||[];
+      return{key:k,entries:e,totals:sumE(e)};
+    }));
+    setHistDays(days);
+  };
+
+  // ── Weekly ──
+  const loadWeekly=async()=>{
+    const days=[];
+    for(let i=6;i>=0;i--){
+      const d=new Date();d.setDate(d.getDate()-i);
+      const k=d.toISOString().slice(0,10);
+      const e=await sg(`fp:day:${k}`)||[];
+      const w=await sg(`fp:water:${k}`)||0;
+      days.push({key:k,label:d.toLocaleDateString("en-AU",{weekday:"short"}),totals:sumE(e),water:w});
+    }
+    setWeekData(days);
+  };
+
+  // ── Search ──
+  const doSearch=async()=>{
+    if(!searchQ.trim())return;
+    setSearchLoading(true);setSearchR([]);
+    const r=await searchFood(searchQ);
+    setSearchR(r);setSearchLoading(false);
+  };
+
+  // ── Suggestions ──
+  const getSuggestions=async()=>{
+    if(!targets)return;
+    const t=sumE(entries);
+    const rem={cal:Math.max(0,(targets.calories||0)-t.cal),protein:Math.max(0,(targets.protein||0)-t.protein),carbs:Math.max(0,(targets.carbs||0)-t.carbs),fat:Math.max(0,(targets.fat||0)-t.fat)};
+    setSuggestLoading(true);setSuggestions([]);
+    const s=await getMeals(rem,targets);
+    setSuggestions(s);setSuggestLoading(false);
+  };
+
+  // ── Derived ──
+  const totals=sumE(entries);
+  const calLeft=(targets?.calories||0)-totals.cal;
+  const tdee=targets?.tdee||0;
+  const resolvedGoal=resolveGoal(defGoal,tdee);
+  // actual deficit today
+  const todayDeficit=tdee>0?tdee-totals.cal:null;
+
+  const STYLES=`
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .fi{animation:fi 0.2s ease forwards}
+    input::placeholder{color:#4a6078}
+    input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+    input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.4)}
+    ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:${C.bg}} ::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px}
+  `;
+
+  // ─── Loading ──────────────────────────────────────────────────────────────
+  if(screen==="loading") return(
+    <div style={{...pStyle,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <style>{STYLES}</style>
+      <Spin/>&nbsp;<span style={{color:C.muted,fontSize:13}}>Loading…</span>
+    </div>
+  );
+
+  // ─── Setup ────────────────────────────────────────────────────────────────
+  if(screen==="setup") return(
+    <div style={pStyle}>
+      <style>{STYLES}</style>
+      <div style={{padding:20}}>
+        <div style={{marginBottom:28,paddingTop:20}}>
+          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:8}}>FUEL PROTOCOL</div>
+          <div style={{fontSize:28,fontWeight:700,color:C.text,lineHeight:1.15}}>Set your<br/><span style={{color:C.orange}}>targets</span></div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+          {[["weight","Weight (kg)","number"],["height","Height (cm)","number"],["age","Age","number"]].map(([f,p,t])=>(
+            <input key={f} type={t} placeholder={p} value={stats[f]} onChange={e=>setStats(s=>({...s,[f]:e.target.value}))} style={{...iStyle,gridColumn:f==="age"?"1 / -1":undefined}}/>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+          {[["male","♂ Male"],["female","♀ Female"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setStats(s=>({...s,sex:v}))} style={chipFn(stats.sex===v)}>{l}</button>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+          {[["sedentary","Sedentary"],["light","Light"],["moderate","Moderate"],["active","Very Active"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setStats(s=>({...s,activity:v}))} style={chipFn(stats.activity===v,C.cyan)}>{l}</button>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:28}}>
+          {[["lose","🔥 Lose"],["lose-muscle","💪 Lose+Build"],["maintain","⚖️ Maintain"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setStats(s=>({...s,goal:v}))} style={chipFn(stats.goal===v,C.violet)}>{l}</button>
+          ))}
+        </div>
+        <button onClick={handleSetup} style={btnFn()}>Calculate & Start →</button>
+      </div>
+    </div>
+  );
+
+  // ─── Main App ─────────────────────────────────────────────────────────────
+  return(
+    <div style={pStyle}>
+      <style>{STYLES}</style>
+
+      {/* ══ TODAY ══════════════════════════════════════════════════════════════ */}
+      {nav==="tracker"&&(
+        <div className="fi">
+          {/* Header */}
+          <div style={{padding:"18px 14px 0",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase"}}>FUEL PROTOCOL</div>
+              <div style={{fontSize:19,fontWeight:700,color:C.text}}>{new Date().toLocaleDateString("en-AU",{weekday:"long",month:"short",day:"numeric"})}</div>
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              {streak>0&&<div style={{background:C.subtle,border:`1px solid ${C.border}`,borderRadius:8,padding:"3px 9px",fontSize:11,color:C.orange,fontWeight:700}}>🔥{streak}d</div>}
+              <button onClick={()=>setScreen("setup")} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:8,color:C.muted,fontSize:11,padding:"4px 9px",cursor:"pointer"}}>⚙</button>
+            </div>
+          </div>
+
+          {/* Calorie hero */}
+          <div style={{padding:"10px 14px 0"}}>
+            <div style={{...crd,background:`linear-gradient(135deg,${C.card},${C.surface})`,position:"relative",overflow:"hidden"}}>
+              <div style={{position:"absolute",top:-30,right:-30,width:140,height:140,borderRadius:"50%",background:calLeft<0?"rgba(255,71,87,0.06)":"rgba(255,107,43,0.06)",filter:"blur(30px)"}}/>
+              <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.15em",marginBottom:1}}>Calories Remaining</div>
+              <div style={{fontSize:48,fontWeight:700,color:calLeft<0?C.red:C.orange,lineHeight:1}}>{calLeft<0?"-":""}{Math.abs(calLeft)}</div>
+              <div style={{fontSize:11,color:C.muted,marginTop:1}}>{totals.cal} eaten · {targets?.calories} target · {tdee} TDEE</div>
+              <div style={{display:"flex",gap:10,marginTop:14,justifyContent:"space-around"}}>
+                <Ring value={totals.protein} max={targets?.protein||1} color={C.cyan} size={64} label={`${totals.protein}g`} sub="protein"/>
+                <Ring value={totals.carbs} max={targets?.carbs||1} color={C.violet} size={64} label={`${totals.carbs}g`} sub="carbs"/>
+                <Ring value={totals.fat} max={targets?.fat||1} color={C.green} size={64} label={`${totals.fat}g`} sub="fat"/>
+              </div>
+            </div>
+          </div>
+
+          {/* Macro bars */}
+          <div style={{padding:"10px 14px 0"}}>
+            <div style={crd}>
+              <Bar label="Protein" current={totals.protein} max={targets?.protein||1} color={C.cyan}/>
+              <Bar label="Carbs" current={totals.carbs} max={targets?.carbs||1} color={C.violet}/>
+              <Bar label="Fat" current={totals.fat} max={targets?.fat||1} color={C.green}/>
+            </div>
+          </div>
+
+          {/* Today deficit card */}
+          {tdee>0&&totals.cal>0&&(()=>{
+            const actual=todayDeficit;
+            const isSurplus=actual<0;
+            const goalD=resolvedGoal?.dailyDeficit||0;
+            const gFat=Math.round(Math.abs(actual)/7.7);
+            const kgWk=+((actual/7700)*7).toFixed(2);
+            const pctOfGoal=goalD>0?Math.round((actual/goalD)*100):null;
+            const defColor=isSurplus?C.red:actual<100?C.muted:actual>=goalD&&goalD>0?C.green:C.orange;
+            return(
+              <div style={{padding:"10px 14px 0"}}>
+                <div style={{...crd,border:`1px solid ${isSurplus?C.red+"44":actual>=(goalD||1)&&goalD>0?C.green+"44":C.border}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                    <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase"}}>Today's Deficit</div>
+                    {resolvedGoal&&<div style={{fontSize:9,color:C.muted}}>Goal: −{resolvedGoal.dailyDeficit}kcal/day</div>}
+                  </div>
+
+                  <div style={{fontSize:36,fontWeight:700,color:defColor,lineHeight:1,marginBottom:2}}>
+                    {isSurplus?"+":" −"}{Math.abs(actual).toLocaleString()}
+                    <span style={{fontSize:13,fontWeight:400,color:C.muted}}> kcal</span>
+                  </div>
+                  <div style={{fontSize:10,color:C.muted,marginBottom:12}}>{totals.cal} eaten vs {tdee} TDEE</div>
+
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:pctOfGoal!=null?12:0}}>
+                    <Tile label="Fat today" value={isSurplus?`+${gFat}g`:`~${gFat}g`} color={defColor}/>
+                    <Tile label="Pace /wk" value={isSurplus?`+${Math.abs(kgWk)}kg`:`−${Math.abs(kgWk)}kg`} color={defColor}/>
+                    <Tile label="Pace /mo" value={isSurplus?`+${Math.abs(+(kgWk*4).toFixed(1))}kg`:`−${+(Math.abs(kgWk)*4).toFixed(1)}kg`} color={defColor}/>
+                  </div>
+
+                  {pctOfGoal!=null&&(
+                    <>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.muted,marginBottom:4}}>
+                        <span>vs your goal deficit</span>
+                        <span style={{color:defColor,fontWeight:700}}>{pctOfGoal}%</span>
+                      </div>
+                      <div style={{height:6,borderRadius:99,background:C.subtle,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:`${Math.min(Math.max(pctOfGoal,0),100)}%`,borderRadius:99,background:isSurplus?C.red:pctOfGoal>=100?C.green:C.orange,transition:"width 0.5s"}}/>
+                      </div>
+                      <div style={{fontSize:9,color:C.muted,marginTop:5}}>
+                        {isSurplus?"⚠️ Surplus today — tap Goals to adjust your plan":pctOfGoal>=100?"✅ Deficit goal hit!":pctOfGoal>=60?"💪 Good progress, keep going":"📉 Under goal — room to tighten up"}
+                      </div>
+                    </>
+                  )}
+                  {pctOfGoal==null&&(
+                    <div style={{fontSize:9,color:C.muted,marginTop:4}}>
+                      💡 <span style={{color:C.violet,cursor:"pointer"}} onClick={()=>setNav("goals")}>Set a deficit goal →</span> to track progress here
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Water */}
+          <div style={{padding:"10px 14px 0"}}>
+            <div style={{...crd,display:"flex",alignItems:"center",gap:14}}>
+              <WaterRing ml={water}/>
+              <div style={{flex:1}}>
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Hydration</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:5}}>
+                  {[150,250,500].map(ml=>(<button key={ml} onClick={()=>saveWater(water+ml)} style={{...chipFn(false,C.cyan),fontSize:10}}>+{ml}ml</button>))}
+                  <button onClick={()=>saveWater(Math.max(0,water-250))} style={{...chipFn(false,C.muted),gridColumn:"1/3",fontSize:10}}>−250ml</button>
+                  <button onClick={()=>saveWater(0)} style={{...chipFn(false,C.red),fontSize:9}}>Reset</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Meal suggestions */}
+          <div style={{padding:"10px 14px 0"}}>
+            <div style={crd}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase"}}>Meal Suggestions</div>
+                <button onClick={getSuggestions} disabled={suggestLoading} style={{background:C.subtle,border:`1px solid ${C.border}`,borderRadius:8,color:C.orange,fontSize:11,padding:"5px 11px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700}}>
+                  {suggestLoading?<Spin col={C.orange}/>:"✨ Suggest"}
+                </button>
+              </div>
+              {suggestions.length>0?suggestions.map((s,i)=>(
+                <div key={i} style={{background:C.subtle,borderRadius:10,padding:"10px 11px",marginBottom:6,border:`1px solid ${C.border}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:1}}>{s.name}</div>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:4}}>{s.description}</div>
+                      <div style={{fontSize:10}}><span style={{color:C.orange}}>{s.cal}cal</span> · <span style={{color:C.cyan}}>{s.protein}g pro</span> · <span style={{color:C.violet}}>{s.carbs}g carbs</span> · <span style={{color:C.green}}>{s.fat}g fat</span></div>
+                      {s.tip&&<div style={{fontSize:10,color:C.violet,marginTop:3}}>💡 {s.tip}</div>}
+                    </div>
+                    <button onClick={()=>addFood({name:s.name,cal:s.cal,protein:s.protein,carbs:s.carbs,fat:s.fat})} style={{background:C.orange,border:"none",borderRadius:8,color:"#fff",fontSize:11,padding:"5px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",marginLeft:8,flexShrink:0}}>+ Add</button>
+                  </div>
+                </div>
+              )):<div style={{textAlign:"center",color:C.muted,fontSize:11,padding:"10px 0"}}>Tap Suggest for AI meal ideas based on your remaining macros</div>}
+            </div>
+          </div>
+
+          {/* Log food */}
+          <div style={{padding:"10px 14px 0"}}>
+            <div style={crd}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase"}}>Log Food</div>
+                {templates.length>0&&<button onClick={()=>setShowTpl(v=>!v)} style={{background:C.subtle,border:`1px solid ${C.border}`,borderRadius:8,color:C.violet,fontSize:10,padding:"4px 9px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700}}>📋 {showTpl?"Hide":"Templates"}</button>}
+              </div>
+              {showTpl&&(
+                <div style={{marginBottom:10}}>
+                  {templates.map(t=>(
+                    <div key={t.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.subtle,borderRadius:8,padding:"8px 10px",marginBottom:5,border:`1px solid ${C.border}`}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:700,color:C.text}}>{t.name}</div>
+                        <div style={{fontSize:10,color:C.muted}}>{t.cal}cal · {t.protein}g pro · {t.carbs}g carbs · {t.fat}g fat</div>
+                      </div>
+                      <div style={{display:"flex",gap:5}}>
+                        <button onClick={()=>addFood(t)} style={{background:C.orange,border:"none",borderRadius:6,color:"#fff",fontSize:11,padding:"4px 8px",cursor:"pointer"}}>+</button>
+                        <button onClick={()=>removeTpl(t.id)} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,color:C.red,fontSize:11,padding:"4px 8px",cursor:"pointer"}}>✕</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <input placeholder="Food name" value={newFood.name} onChange={e=>setNewFood(p=>({...p,name:e.target.value}))} style={{...iStyle,marginBottom:7}}/>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                {[["cal","Cals"],["protein","Pro"],["carbs","Carbs"],["fat","Fat"]].map(([f,p])=>(
+                  <input key={f} type="number" placeholder={p} value={newFood[f]} onChange={e=>setNewFood(prev=>({...prev,[f]:e.target.value}))} style={{...iStyle,fontSize:11}}/>
+                ))}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+                <button onClick={addFromForm} style={btnFn()}>+ Add</button>
+                <button onClick={()=>{if(!newFood.name||!newFood.cal)return;saveTpl({name:newFood.name,cal:parseInt(newFood.cal)||0,protein:parseInt(newFood.protein)||0,carbs:parseInt(newFood.carbs)||0,fat:parseInt(newFood.fat)||0});}} style={btnFn(C.violet)}>💾 Template</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Today's log */}
+          <div style={{padding:"10px 14px 0"}}>
+            <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Today's Log · {entries.length} items</div>
+            {entries.length===0&&<div style={{textAlign:"center",color:C.border,padding:"20px 0",fontSize:12}}>No food logged yet. Add your first meal above!</div>}
+            {[...entries].reverse().map(e=>(
+              <div key={e.id} style={{...crd,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6,padding:"10px 12px"}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{e.name}</div>
+                  <div style={{fontSize:10,color:C.muted,marginTop:2}}>
+                    <span style={{color:C.orange}}>{e.cal}cal</span>
+                    {e.protein>0&&<span> · <span style={{color:C.cyan}}>{e.protein}g pro</span></span>}
+                    {e.carbs>0&&<span> · {e.carbs}g carbs</span>}
+                    {e.fat>0&&<span> · {e.fat}g fat</span>}
+                    <span> · {e.time}</span>
+                  </div>
+                </div>
+                <button onClick={()=>removeFood(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:14,padding:"4px 6px"}}>✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ══ SEARCH ══════════════════════════════════════════════════════════════ */}
+      {nav==="search"&&(
+        <div className="fi" style={{padding:"18px 14px"}}>
+          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:4}}>Food Search</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:12}}>Coles · Woolworths · Aldi · Fast food · Uber Eats — AI powered</div>
+          <div style={{display:"flex",gap:7,marginBottom:14}}>
+            <input placeholder="e.g. Coles chicken breast, Big Mac…" value={searchQ} onChange={e=>setSearchQ(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doSearch()} style={{...iStyle,flex:1}}/>
+            <button onClick={doSearch} disabled={searchLoading} style={{...btnFn(),width:"auto",padding:"10px 14px",flexShrink:0}}>{searchLoading?<Spin/>:"Go"}</button>
+          </div>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:9,color:C.muted,marginBottom:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>Quick searches</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+              {["Big Mac","Coles Greek Yoghurt","Woolworths chicken breast","Aldi protein bar","Subway footlong","KFC Original Piece","Boost Mango","Sanitarium Weet-Bix","Aldi Quest bar","McDonald's McChicken"].map(q=>(
+                <button key={q} onClick={()=>setSearchQ(q)} style={{...chipFn(searchQ===q,C.cyan),padding:"5px 9px",fontSize:10}}>{q}</button>
+              ))}
+            </div>
+          </div>
+          {searchLoading&&<div style={{textAlign:"center",padding:"28px 0",color:C.muted,fontSize:12}}><Spin col={C.orange}/><br/><span style={{display:"block",marginTop:8}}>Searching nutrition data…</span></div>}
+          {searchR.map((r,i)=>(
+            <div key={i} style={{...crd,marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{r.name}</div>
+                  {r.brand&&<div style={{fontSize:10,color:C.orange,marginBottom:1}}>{r.brand}</div>}
+                  {r.serving&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>per {r.serving}</div>}
+                  <div style={{display:"flex",gap:10,fontSize:11,flexWrap:"wrap"}}>
+                    <span style={{color:C.orange,fontWeight:700}}>{r.cal}cal</span>
+                    <span style={{color:C.cyan}}>{r.protein}g pro</span>
+                    <span style={{color:C.violet}}>{r.carbs}g carbs</span>
+                    <span style={{color:C.green}}>{r.fat}g fat</span>
+                  </div>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:10}}>
+                  <button onClick={()=>addFood({name:r.name,cal:r.cal,protein:r.protein,carbs:r.carbs,fat:r.fat})} style={{background:C.orange,border:"none",borderRadius:8,color:"#fff",fontSize:11,padding:"6px 11px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700}}>+ Log</button>
+                  <button onClick={()=>saveTpl({name:r.name,cal:r.cal,protein:r.protein,carbs:r.carbs,fat:r.fat})} style={{background:C.subtle,border:`1px solid ${C.border}`,borderRadius:8,color:C.violet,fontSize:10,padding:"5px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>💾 Save</button>
+                </div>
+              </div>
+            </div>
+          ))}
+          {!searchLoading&&searchR.length===0&&searchQ&&<div style={{textAlign:"center",color:C.muted,fontSize:12,padding:"20px 0"}}>No results — tap Go to search!</div>}
+          {!searchLoading&&searchR.length===0&&!searchQ&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"28px 0"}}>Search any food to get full nutrition info</div>}
+        </div>
+      )}
+
+      {/* ══ GOALS ═══════════════════════════════════════════════════════════════ */}
+      {nav==="goals"&&(
+        <div className="fi" style={{padding:"18px 14px"}}>
+          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:4}}>Deficit Goals</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:16}}>Set a loss rate or a target by a date — the app calculates your required daily deficit.</div>
+
+          {/* Mode toggle */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+            <button onClick={()=>setDgDraft(d=>({...d,mode:"rate"}))} style={chipFn(dgDraft.mode==="rate",C.orange)}>📉 Loss Rate</button>
+            <button onClick={()=>setDgDraft(d=>({...d,mode:"date"}))} style={chipFn(dgDraft.mode==="date",C.violet)}>📅 Target Date</button>
+          </div>
+
+          {/* Rate mode */}
+          {dgDraft.mode==="rate"&&(
+            <div style={{...crd,marginBottom:12}}>
+              <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:12}}>Weekly Loss Rate</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:12}}>
+                {[0.25,0.5,0.75,1.0].map(v=>(
+                  <button key={v} onClick={()=>setDgDraft(d=>({...d,kgPerWeek:String(v)}))}
+                    style={{...chipFn(parseFloat(dgDraft.kgPerWeek)===v,C.orange),padding:"10px 4px",fontSize:11}}>
+                    {v}kg<br/><span style={{fontSize:8,fontWeight:400}}>/ wk</span>
+                  </button>
+                ))}
+                {[1.25,1.5,1.75,2.0].map(v=>(
+                  <button key={v} onClick={()=>setDgDraft(d=>({...d,kgPerWeek:String(v)}))}
+                    style={{...chipFn(parseFloat(dgDraft.kgPerWeek)===v,C.orange),padding:"10px 4px",fontSize:11}}>
+                    {v}kg<br/><span style={{fontSize:8,fontWeight:400}}>/ wk</span>
+                  </button>
+                ))}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                <span style={{fontSize:10,color:C.muted,flexShrink:0}}>Custom:</span>
+                <input type="number" placeholder="e.g. 0.8" value={dgDraft.kgPerWeek} onChange={e=>setDgDraft(d=>({...d,kgPerWeek:e.target.value}))} style={{...iStyle,flex:1}}/>
+                <span style={{fontSize:10,color:C.muted,flexShrink:0}}>kg/wk</span>
+              </div>
+              <div style={{marginTop:12}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:4}}>Also set a total target (optional):</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <input type="number" placeholder="e.g. 10" value={dgDraft.targetKg} onChange={e=>setDgDraft(d=>({...d,targetKg:e.target.value}))} style={{...iStyle,flex:1}}/>
+                  <span style={{fontSize:10,color:C.muted,flexShrink:0}}>kg to lose</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Date mode */}
+          {dgDraft.mode==="date"&&(
+            <div style={{...crd,marginBottom:12}}>
+              <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:12}}>Target by a Date</div>
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:10,color:C.muted,marginBottom:5}}>How much do you want to lose?</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <input type="number" placeholder="e.g. 5" value={dgDraft.targetKg} onChange={e=>setDgDraft(d=>({...d,targetKg:e.target.value}))} style={{...iStyle,flex:1}}/>
+                  <span style={{fontSize:10,color:C.muted,flexShrink:0}}>kg</span>
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:10,color:C.muted,marginBottom:5}}>By when?</div>
+                <input type="date" min={minDate()} value={dgDraft.targetDate} onChange={e=>setDgDraft(d=>({...d,targetDate:e.target.value}))} style={iStyle}/>
+                {/* Quick date presets */}
+                <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+                  {[["1 month",30],["3 months",90],["6 months",180],["1 year",365]].map(([l,days])=>{
+                    const d=new Date();d.setDate(d.getDate()+days);
+                    const v=d.toISOString().slice(0,10);
+                    return <button key={l} onClick={()=>setDgDraft(dr=>({...dr,targetDate:v}))} style={{...chipFn(dgDraft.targetDate===v,C.violet),padding:"5px 10px",fontSize:10}}>{l}</button>;
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Live preview */}
+          {(()=>{
+            const preview=resolveGoal(dgDraft,tdee);
+            if(!preview||!tdee) return(
+              <div style={{...crd,marginBottom:12,textAlign:"center",color:C.muted,fontSize:11,padding:"18px"}}>
+                Complete your profile in ⚙ Settings to see calorie targets
+              </div>
+            );
+            const safe=safetyLabel(preview.calsPerDay);
+            const isSurplus=preview.calsPerDay<0;
+            return(
+              <div style={{...crd,marginBottom:12,border:`1px solid ${safe?C.red+"55":C.green+"44"}`}}>
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:12}}>📊 Live Preview</div>
+
+                {/* Big calorie target */}
+                <div style={{textAlign:"center",marginBottom:14,padding:"14px",background:C.subtle,borderRadius:12}}>
+                  <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>Daily Calorie Target</div>
+                  <div style={{fontSize:40,fontWeight:700,color:isSurplus?C.red:C.orange,lineHeight:1}}>{Math.max(preview.calsPerDay,0).toLocaleString()}</div>
+                  <div style={{fontSize:10,color:C.muted,marginTop:3}}>−{preview.dailyDeficit.toLocaleString()} kcal deficit · {tdee} TDEE</div>
+                </div>
+
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:safe?10:0}}>
+                  <Tile label="Loss per week" value={`−${preview.kgPerWeek}kg`} color={C.green} sub="7,700kcal = 1kg"/>
+                  <Tile label="Loss per month" value={`−${+(preview.kgPerWeek*4).toFixed(1)}kg`} color={C.green}/>
+                  {preview.daysLeft!=null&&<Tile label="Days remaining" value={preview.daysLeft} color={C.cyan} sub={`to ${fmtDate(preview.arrivalDate)}`}/>}
+                  {preview.totalKg&&<Tile label="Total to lose" value={`${preview.totalKg}kg`} color={C.violet} sub={preview.weeksTo?`~${preview.weeksTo} wks`:""}/>}
+                  {preview.weeksTo&&<Tile label="Estimated done" value={preview.arrivalDate||"—"} color={C.cyan}/>}
+                  {preview.daysLeft==null&&!preview.weeksTo&&<Tile label="Daily deficit" value={`−${preview.dailyDeficit}kcal`} color={C.orange}/>}
+                </div>
+
+                {safe&&(
+                  <div style={{padding:"8px 10px",background:`${C.red}18`,borderRadius:8,border:`1px solid ${C.red}44`,fontSize:10,color:safe.color,marginTop:10}}>
+                    {safe.text}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          <button onClick={async()=>{await saveDefGoal(dgDraft);}} style={btnFn()}>✅ Save Goal</button>
+
+          {defGoal&&(
+            <button onClick={async()=>{setDefGoal(null);setDgDraft({mode:"rate",kgPerWeek:"0.5",targetKg:"",targetDate:""});await ss("fp:deficitgoal",null);}}
+              style={{...btnFn(C.subtle),marginTop:8,color:C.red,border:`1px solid ${C.border}`}}>
+              🗑 Clear Goal
+            </button>
+          )}
+
+          {/* How it works */}
+          <div style={{...crd,marginTop:14}}>
+            <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>How it works</div>
+            <div style={{fontSize:10,color:C.muted,lineHeight:1.7}}>
+              <div>• <span style={{color:C.text}}>1 kg of fat ≈ 7,700 kcal</span></div>
+              <div>• To lose 0.5kg/week you need a −550kcal/day deficit</div>
+              <div>• To lose 1kg/week you need a −1,100kcal/day deficit</div>
+              <div>• Safe range is generally 0.25–1kg/week</div>
+              <div>• Never go below 1,000–1,200 kcal/day</div>
+              <div>• Your deficit = TDEE ({tdee||"?"} kcal) minus calories eaten</div>
+              <div style={{marginTop:6,color:C.border}}>Estimates only. Consult a health professional for medical advice.</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ WEIGHT ══════════════════════════════════════════════════════════════ */}
+      {nav==="weight"&&(
+        <div className="fi" style={{padding:"18px 14px"}}>
+          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:14}}>Weight Log</div>
+          <div style={{...crd,marginBottom:12}}>
+            <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:9}}>Log Today's Weight</div>
+            <div style={{display:"flex",gap:7}}>
+              <input type="number" placeholder="e.g. 75.5" value={newW} onChange={e=>setNewW(e.target.value)} style={{...iStyle,flex:1}}/>
+              <span style={{color:C.muted,lineHeight:"40px",fontSize:13}}>kg</span>
+              <button onClick={logWeight} style={{...btnFn(),width:"auto",padding:"10px 14px"}}>Log</button>
+            </div>
+          </div>
+
+          {/* Trend + goal overlay */}
+          {wLog.length>1&&(()=>{
+            const recent=wLog.slice(-14);
+            const minW=Math.min(...recent.map(x=>x.kg));
+            const maxW=Math.max(...recent.map(x=>x.kg));
+            const range=maxW-minW||0.1;
+            const W=370,H=80,pd=8;
+            const first=wLog[0].kg,last=wLog[wLog.length-1].kg,diff=+(last-first).toFixed(1);
+            const pts=recent.map((x,i)=>{const px=pd+(i/(recent.length-1||1))*(W-pd*2);const py=H-pd-(((x.kg-minW)/range)*(H-pd*2));return`${px},${py}`;}).join(" ");
+            const apts=recent.map((x,i)=>{const px=pd+(i/(recent.length-1||1))*(W-pd*2);const py=H-pd-(((x.kg-minW)/range)*(H-pd*2));return`${px},${py}`;});
+            return(
+              <div style={{...crd,marginBottom:12}}>
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:4}}>Trend</div>
+                <div style={{display:"flex",gap:16,marginBottom:10}}>
+                  <div><div style={{fontSize:9,color:C.muted}}>Current</div><div style={{fontSize:18,fontWeight:700,color:C.orange}}>{last}kg</div></div>
+                  <div><div style={{fontSize:9,color:C.muted}}>Change</div><div style={{fontSize:18,fontWeight:700,color:diff<0?C.green:diff>0?C.red:C.muted}}>{diff>0?"+":""}{diff}kg</div></div>
+                  {resolvedGoal?.totalKg&&<div><div style={{fontSize:9,color:C.muted}}>Goal loss</div><div style={{fontSize:18,fontWeight:700,color:C.violet}}>−{resolvedGoal.totalKg}kg</div></div>}
+                </div>
+                <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:"block",overflow:"visible"}}>
+                  <defs><linearGradient id="og" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.orange} stopOpacity="0.15"/><stop offset="100%" stopColor={C.orange} stopOpacity="0"/></linearGradient></defs>
+                  <polygon points={`${pd},${H} ${apts.join(" ")} ${W-pd},${H}`} fill="url(#og)"/>
+                  <polyline points={pts} fill="none" stroke={C.orange} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"/>
+                  {recent.map((x,i)=>{const px=pd+(i/(recent.length-1||1))*(W-pd*2);const py=H-pd-(((x.kg-minW)/range)*(H-pd*2));return<circle key={i} cx={px} cy={py} r={3.5} fill={C.orange}/>;})}
+                </svg>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.muted,marginTop:4}}>
+                  <span>{fmtDate(recent[0].date)}</span><span>{fmtDate(recent[recent.length-1].date)}</span>
+                </div>
+                {resolvedGoal?.totalKg&&last&&(()=>{
+                  const targetW=first-resolvedGoal.totalKg;
+                  const done=Math.max(0,first-last);
+                  const pctDone=Math.round((done/resolvedGoal.totalKg)*100);
+                  return(
+                    <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.muted,marginBottom:4}}>
+                        <span>Goal progress: {done.toFixed(1)}kg / {resolvedGoal.totalKg}kg lost</span>
+                        <span style={{color:C.violet,fontWeight:700}}>{pctDone}%</span>
+                      </div>
+                      <div style={{height:5,borderRadius:99,background:C.subtle,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:`${Math.min(pctDone,100)}%`,borderRadius:99,background:C.violet,transition:"width 0.5s"}}/>
+                      </div>
+                      <div style={{fontSize:9,color:C.muted,marginTop:3}}>Target: {targetW.toFixed(1)}kg</div>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })()}
+
+          <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:7}}>All Entries</div>
+          {wLog.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"20px 0"}}>No weight entries yet</div>}
+          {[...wLog].reverse().map((w,i)=>(
+            <div key={i} style={{...crd,marginBottom:6,display:"flex",justifyContent:"space-between",padding:"10px 12px"}}>
+              <span style={{fontSize:12,color:C.muted}}>{fmtDate(w.date)}</span>
+              <span style={{fontSize:14,fontWeight:700,color:C.orange}}>{w.kg} kg</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ══ WEEKLY ══════════════════════════════════════════════════════════════ */}
+      {nav==="weekly"&&(
+        <div className="fi" style={{padding:"18px 14px"}}>
+          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:14}}>Weekly Summary</div>
+          <button onClick={loadWeekly} style={{...btnFn(C.cyan),width:"auto",padding:"8px 18px",marginBottom:14}}>Refresh</button>
+
+          {weekData.length>0&&(()=>{
+            const avg=Math.round(weekData.reduce((a,d)=>a+d.totals.cal,0)/7);
+            const logged=weekData.filter(d=>d.totals.cal>0).length;
+            const onTarget=weekData.filter(d=>d.totals.cal>0&&Math.abs(d.totals.cal-(targets?.calories||2000))<300).length;
+            const totalPro=weekData.reduce((a,d)=>a+d.totals.protein,0);
+            const goalD=resolvedGoal?.dailyDeficit||0;
+
+            // Weekly deficit analysis
+            const loggedDays=weekData.filter(d=>d.totals.cal>0);
+            const totalDeficit=tdee>0?loggedDays.reduce((a,d)=>a+(tdee-d.totals.cal),0):0;
+            const avgDefPerDay=loggedDays.length>0?Math.round(totalDeficit/loggedDays.length):0;
+            const estFatG=Math.round(totalDeficit/7.7);
+            const estFatKg=+(totalDeficit/7700).toFixed(3);
+            const projMonth=+((estFatKg/7)*30).toFixed(2);
+            const isSurplusWk=totalDeficit<0;
+            const defColorWk=isSurplusWk?C.red:C.green;
+            const maxAbsDef=Math.max(...weekData.map(d=>d.totals.cal>0?Math.abs(tdee-d.totals.cal):0),goalD,1);
+
+            return(
+              <>
+                {/* Summary tiles */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:12}}>
+                  {[{l:"Avg Cal/day",v:`${avg}`,s:"this week",c:C.orange},{l:"Days On Target",v:`${onTarget}/7`,s:"±300cal",c:C.green},{l:"Total Protein",v:`${totalPro}g`,s:"this week",c:C.cyan},{l:"Days Logged",v:`${logged}/7`,s:"with entries",c:C.violet}].map((x,i)=>(
+                    <div key={i} style={{...crd,textAlign:"center"}}>
+                      <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:3}}>{x.l}</div>
+                      <div style={{fontSize:17,fontWeight:700,color:x.c}}>{x.v}</div>
+                      <div style={{fontSize:9,color:C.muted}}>{x.s}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Weekly deficit analysis */}
+                {tdee>0&&loggedDays.length>0&&(
+                  <div style={{...crd,marginBottom:12,border:`1px solid ${isSurplusWk?C.red+"55":C.green+"44"}`}}>
+                    <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>
+                      ⚖️ Deficit Analysis
+                    </div>
+
+                    {/* Radial rings if goal set */}
+                    {resolvedGoal&&(
+                      <div style={{display:"flex",justifyContent:"space-around",marginBottom:14}}>
+                        <GoalRing pct={goalD>0?Math.round((avgDefPerDay/goalD)*100):0} color={C.orange} size={90} stroke={7} label={`${avgDefPerDay>0?"−":"+"}${Math.abs(avgDefPerDay)}kcal`} sub="avg deficit/day"/>
+                        <GoalRing pct={resolvedGoal.kgPerWeek>0?Math.round((Math.abs(estFatKg)/resolvedGoal.kgPerWeek)*100):0} color={C.green} size={90} stroke={7} label={`${isSurplusWk?"+":"−"}${Math.abs(estFatKg).toFixed(2)}kg`} sub="fat this week"/>
+                      </div>
+                    )}
+
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:12}}>
+                      <Tile label="Total deficit" value={`${isSurplusWk?"+":"−"}${Math.abs(totalDeficit).toLocaleString()}kcal`} color={defColorWk}/>
+                      <Tile label="Avg per day" value={`${avgDefPerDay>0?"−":"+"}${Math.abs(avgDefPerDay)}kcal`} color={defColorWk}/>
+                      <Tile label={`Est. fat ${isSurplusWk?"gained":"lost"}`} value={`${Math.abs(estFatG)}g / ${Math.abs(estFatKg).toFixed(2)}kg`} color={defColorWk}/>
+                      <Tile label="30-day proj." value={`${isSurplusWk?"+":"−"}${Math.abs(projMonth)}kg`} color={defColorWk}/>
+                    </div>
+
+                    {/* Per-day deficit bars */}
+                    <div style={{fontSize:9,color:C.muted,fontWeight:700,letterSpacing:"0.07em",textTransform:"uppercase",marginBottom:7}}>
+                      Daily vs TDEE ({tdee}kcal){resolvedGoal?` — goal: −${goalD}kcal`:""}
+                    </div>
+                    {weekData.map((d,i)=>{
+                      if(d.totals.cal===0) return(
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5}}>
+                          <div style={{fontSize:9,color:C.muted,width:26,flexShrink:0}}>{d.label}</div>
+                          <div style={{flex:1,height:16,borderRadius:4,background:C.subtle,display:"flex",alignItems:"center",paddingLeft:6}}>
+                            <span style={{fontSize:8,color:C.border}}>not logged</span>
+                          </div>
+                        </div>
+                      );
+                      const def=tdee-d.totals.cal;
+                      const isSur=def<0;
+                      const barW=Math.min((Math.abs(def)/maxAbsDef)*100,100);
+                      const col=isSur?C.red:goalD>0&&def>=goalD?C.green:C.orange;
+                      const gFat=Math.round(Math.abs(def)/7.7);
+                      return(
+                        <div key={i} style={{marginBottom:6}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <div style={{fontSize:9,color:d.key===today?C.orange:C.muted,width:26,flexShrink:0,fontWeight:d.key===today?700:400}}>{d.label}</div>
+                            <div style={{flex:1,height:16,borderRadius:4,background:C.subtle,overflow:"hidden"}}>
+                              <div style={{height:"100%",width:`${barW}%`,background:col,borderRadius:4}}/>
+                            </div>
+                            <div style={{fontSize:9,fontWeight:700,color:col,width:58,textAlign:"right",flexShrink:0}}>
+                              {isSur?"+":"-"}{Math.abs(def)}kcal
+                            </div>
+                          </div>
+                          <div style={{fontSize:8,color:C.muted,marginLeft:34,marginTop:1}}>
+                            ~{gFat}g fat {isSur?"gained":"lost"} · {d.totals.cal}cal eaten
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {goalD>0&&<div style={{fontSize:9,color:C.muted,marginTop:8,paddingTop:6,borderTop:`1px solid ${C.border}`}}>🟢 at/above goal · 🟠 partial deficit · 🔴 surplus</div>}
+                    <div style={{fontSize:9,color:C.border,marginTop:4}}>7,700kcal ≈ 1kg fat. Estimates only.</div>
+                  </div>
+                )}
+
+                {/* Cal chart */}
+                <div style={{...crd,marginBottom:12}}>
+                  <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Calories This Week</div>
+                  <div style={{display:"flex",alignItems:"flex-end",gap:5,height:90}}>
+                    {weekData.map((d,i)=>{
+                      const pct=(d.totals.cal/(targets?.calories||2000||1))*100;
+                      const h=Math.max(Math.min(pct*0.7,94),d.totals.cal>0?4:0);
+                      const over=pct>100;
+                      return(
+                        <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                          <div style={{fontSize:8,color:C.muted,textAlign:"center"}}>{d.totals.cal>0?d.totals.cal:""}</div>
+                          <div style={{width:"100%",height:70,display:"flex",alignItems:"flex-end"}}>
+                            <div style={{width:"100%",height:`${h}%`,borderRadius:"4px 4px 2px 2px",background:over?C.red:d.key===today?C.orange:C.subtle,border:`1px solid ${over?C.red:d.key===today?C.orange:C.border}`,transition:"height 0.5s"}}/>
+                          </div>
+                          <div style={{fontSize:8,color:d.key===today?C.orange:C.muted,fontWeight:d.key===today?700:400}}>{d.label}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {targets?.calories&&<div style={{fontSize:9,color:C.muted,textAlign:"center",marginTop:6}}>Target: {targets.calories}cal/day{resolvedGoal?` · Goal: ${Math.max(resolvedGoal.calsPerDay,0)}cal/day`:""}
+                  </div>}
+                </div>
+
+                {/* Water chart */}
+                <div style={{...crd,marginBottom:12}}>
+                  <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Hydration 💧</div>
+                  <div style={{display:"flex",alignItems:"flex-end",gap:5,height:60}}>
+                    {weekData.map((d,i)=>{
+                      const pct=(d.water/WATER_GOAL)*100;
+                      return(
+                        <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                          <div style={{width:"100%",height:50,display:"flex",alignItems:"flex-end"}}>
+                            <div style={{width:"100%",height:`${Math.max(Math.min(pct,100),d.water>0?5:0)}%`,borderRadius:"4px 4px 2px 2px",background:pct>=100?C.cyan:d.water>0?`${C.cyan}66`:C.subtle,border:`1px solid ${pct>=100?C.cyan:C.border}`}}/>
+                          </div>
+                          <div style={{fontSize:8,color:C.muted}}>{d.label}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Daily breakdown */}
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:7}}>Daily Breakdown</div>
+                {[...weekData].reverse().map((d,i)=>(
+                  <div key={i} style={{...crd,marginBottom:6,padding:"10px 12px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                      <span style={{fontSize:12,fontWeight:700,color:d.key===today?C.orange:C.text}}>{fmtDate(d.key)}{d.key===today?" ← today":""}</span>
+                      <span style={{fontSize:12,fontWeight:700,color:C.orange}}>{d.totals.cal}cal</span>
+                    </div>
+                    <div style={{display:"flex",gap:9,fontSize:10,color:C.muted,flexWrap:"wrap"}}>
+                      <span style={{color:C.cyan}}>{d.totals.protein}g pro</span>
+                      <span style={{color:C.violet}}>{d.totals.carbs}g carbs</span>
+                      <span style={{color:C.green}}>{d.totals.fat}g fat</span>
+                      <span>💧{Math.round(d.water/100)/10}L</span>
+                      {tdee>0&&d.totals.cal>0&&<span style={{color:tdee-d.totals.cal<0?C.red:C.muted}}>
+                        {tdee-d.totals.cal<0?"+":"−"}{Math.abs(tdee-d.totals.cal)}kcal deficit
+                      </span>}
+                    </div>
+                  </div>
+                ))}
+              </>
+            );
+          })()}
+          {weekData.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"28px 0"}}>Tap Refresh to load your week</div>}
+        </div>
+      )}
+
+      <NavBar active={nav} onChange={setNav}/>
+    </div>
+  );
+}
