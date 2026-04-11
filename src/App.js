@@ -56,9 +56,9 @@ const sumE=(arr=[])=>arr.reduce((a,e)=>({cal:a.cal+(e.cal||0),protein:a.protein+
 const minDate=()=>{ const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); };
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
-const sg=async(k)=>{try{const r=await window.storage.get(k);return r?JSON.parse(r.value):null;}catch{return null;}};
-const ss=async(k,v)=>{try{await window.storage.set(k,JSON.stringify(v));}catch{}};
-const sl=async(p)=>{try{const r=await window.storage.list(p);return r?.keys||[];}catch{return[];}};
+const sg=async(k)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}};
+const ss=async(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
+const sl=async(p)=>{try{return Object.keys(localStorage).filter(k=>k.startsWith(p));}catch{return[];}};
 
 // ─── AI ───────────────────────────────────────────────────────────────────────
 async function aiCall(prompt,sys){
