@@ -8,8 +8,8 @@ const NAV = [
   {id:"tracker",icon:"⚡",label:"Today"},
   {id:"search",icon:"🔍",label:"Search"},
   {id:"goals",icon:"🎯",label:"Goals"},
+  {id:"history",icon:"📅",label:"Logs"},
   {id:"weight",icon:"📈",label:"Weight"},
-  {id:"weekly",icon:"📊",label:"Weekly"},
 ];
 
 // ─── Math helpers ─────────────────────────────────────────────────────────────
@@ -295,7 +295,88 @@ export default function App(){
     setHistDays(days);
   };
 
+  const NAV = [
+  {id:"tracker",icon:"⚡",label:"Today"},
+  {id:"search",icon:"🔍",label:"Search"},// ── History ──
+  const loadHistory=async()=>{
+    const keys=await sl("fp:day:");
+    const days=await Promise.all(keys.map(k=>k.replace("fp:day:","")).sort((a,b)=>b.localeCompare(a)).map(async k=>{
+      const e=await sg(`fp:day:${k}`)||[];
+      return{key:k,entries:e,totals:sumE(e)};
+    }));
+    setHistDays(days);
+  };
+
   // ── Weekly ──
+  {id:"goals",icon:"🎯",label:"Goals"},
+  {id:"history",icon:"📅",label:"Logs"},
+  {id:"weight",icon:"📈",label:"Weight"},
+];{/* ══ HISTORY ══════════════════════════════════════════════════════════════ */}
+      {nav==="history"&&(
+        <div className="fi" style={{padding:"18px 14px"}}>
+          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:4}}>Day Logs</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:14}}>Every day you log food is automatically saved here</div>
+
+          {dayDetail?(
+            <>
+              <button onClick={()=>setDayDetail(null)} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:8,color:C.muted,fontSize:11,padding:"5px 11px",cursor:"pointer",marginBottom:12}}>← Back</button>
+              <div style={{fontSize:16,fontWeight:700,color:C.text,marginBottom:10}}>{fmtLong(dayDetail.key)}</div>
+              <div style={{...crd,marginBottom:10}}>
+                <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.12em",marginBottom:1}}>Total Calories</div>
+                <div style={{fontSize:38,fontWeight:700,color:C.orange,lineHeight:1}}>{dayDetail.totals.cal}</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:1}}>target: {targets?.calories}</div>
+                <div style={{display:"flex",gap:10,marginTop:12,justifyContent:"space-around"}}>
+                  <Ring value={dayDetail.totals.protein} max={targets?.protein||1} color={C.cyan} size={58} label={`${dayDetail.totals.protein}g`} sub="protein"/>
+                  <Ring value={dayDetail.totals.carbs} max={targets?.carbs||1} color={C.violet} size={58} label={`${dayDetail.totals.carbs}g`} sub="carbs"/>
+                  <Ring value={dayDetail.totals.fat} max={targets?.fat||1} color={C.green} size={58} label={`${dayDetail.totals.fat}g`} sub="fat"/>
+                </div>
+              </div>
+              <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:7}}>{dayDetail.entries.length} items logged</div>
+              {dayDetail.entries.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"16px 0"}}>Nothing logged this day</div>}
+              {[...dayDetail.entries].reverse().map((e,i)=>(
+                <div key={i} style={{...crd,marginBottom:6,padding:"10px 12px"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{e.name}</div>
+                  <div style={{fontSize:10,color:C.muted,marginTop:2}}>
+                    <span style={{color:C.orange}}>{e.cal}cal</span>
+                    {e.protein>0&&<span> · <span style={{color:C.cyan}}>{e.protein}g pro</span></span>}
+                    {e.carbs>0&&<span> · {e.carbs}g carbs</span>}
+                    {e.fat>0&&<span> · {e.fat}g fat</span>}
+                    {e.time&&<span> · {e.time}</span>}
+                  </div>
+                </div>
+              ))}
+            </>
+          ):(
+            <>
+              <button onClick={loadHistory} style={{...btnFn(C.cyan),width:"auto",padding:"8px 18px",marginBottom:12}}>Load Logs</button>
+              {histDays.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"28px 0"}}>Tap Load Logs to see your history</div>}
+              {histDays.map(day=>{
+                const pct=Math.round((day.totals.cal/(targets?.calories||1))*100);
+                return(
+                  <div key={day.key} onClick={()=>setDayDetail(day)} style={{...crd,marginBottom:8,cursor:"pointer",position:"relative",overflow:"hidden"}}>
+                    {day.key===today&&<div style={{position:"absolute",top:10,right:10,background:C.orange,borderRadius:5,fontSize:8,fontWeight:700,color:"#fff",padding:"2px 7px",letterSpacing:"0.1em"}}>TODAY</div>}
+                    <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:1}}>{fmtDate(day.key)}</div>
+                    <div style={{fontSize:10,color:C.muted,marginBottom:8}}>{day.entries.length} items · tap to view</div>
+                    <div style={{height:4,borderRadius:99,background:C.subtle,overflow:"hidden",marginBottom:7}}>
+                      <div style={{height:"100%",width:`${Math.min(pct,100)}%`,borderRadius:99,background:pct>100?C.red:C.orange,transition:"width 0.4s"}}/>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10}}>
+                      <span style={{color:C.orange,fontWeight:700}}>{day.totals.cal}cal</span>
+                      <span style={{color:C.cyan}}>{day.totals.protein}g pro</span>
+                      <span style={{color:C.violet}}>{day.totals.carbs}g carbs</span>
+                      <span style={{color:C.green}}>{day.totals.fat}g fat</span>
+                      <span style={{color:pct>100?C.red:C.muted}}>{pct}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ══ WEIGHT ══════════════════════════════════════════════════════════════ */}
   const loadWeekly=async()=>{
     const days=[];
     for(let i=6;i>=0;i--){
