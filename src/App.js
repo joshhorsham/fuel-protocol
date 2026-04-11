@@ -262,7 +262,19 @@ export default function App(){
   // ── Persist helpers ──
   const saveEntries=async(e)=>{setEntries(e);await ss(`fp:day:${today}`,e);};
   const saveWater=async(w)=>{setWater(w);await ss(`fp:water:${today}`,w);};
-  const saveDefGoal=async(dg)=>{setDefGoal(dg);await ss("fp:deficitgoal",dg);};
+  const saveDefGoal=async(dg)=>{
+    setDefGoal(dg);
+    await ss("fp:deficitgoal",dg);
+    // Also update the daily calorie target to match the new goal
+    if(targets){
+      const preview=resolveGoal(dg,targets.tdee);
+      if(preview&&preview.calsPerDay>0){
+        const updated={...targets,calories:Math.round(preview.calsPerDay)};
+        setTargets(updated);
+        await ss("fp:settings",{stats,targets:updated});
+      }
+    }
+  };
 
   // ── Setup ──
   const handleSetup=async()=>{
@@ -808,7 +820,10 @@ export default function App(){
             );
           })()}
 
-          <button onClick={async()=>{await saveDefGoal(dgDraft);}} style={btnFn()}>✅ Save Goal</button>
+          <button onClick={async()=>{
+            await saveDefGoal(dgDraft);
+            setTimeout(()=>setNav("tracker"),300);
+          }} style={btnFn()}>✅ Save Goal & Update Today</button>
 
           {defGoal&&(
             <button onClick={async()=>{setDefGoal(null);setDgDraft({mode:"rate",kgPerWeek:"0.5",targetKg:"",targetDate:""});await ss("fp:deficitgoal",null);}}
