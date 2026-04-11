@@ -277,7 +277,7 @@ export default function App(){
     const e=[...entries,{id:Date.now(),...item,time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}];
     await saveEntries(e);
   };
-  const removeFood=async(id)=>await saveEntries(entries.filter(e=>e.id!==id));
+  const removeFood=async(id,name)=>{if(!window.confirm(`Remove "${name}" from today?`))return;await saveEntries(entries.filter(e=>e.id!==id));};
   const addFromForm=async()=>{
     if(!newFood.name||!newFood.cal)return;
     await addFood({name:newFood.name,cal:parseInt(newFood.cal)||0,protein:parseInt(newFood.protein)||0,carbs:parseInt(newFood.carbs)||0,fat:parseInt(newFood.fat)||0});
@@ -618,7 +618,7 @@ export default function App(){
                     <span> · {e.time}</span>
                   </div>
                 </div>
-                <button onClick={()=>removeFood(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:14,padding:"4px 6px"}}>✕</button>
+                <button onClick={()=>removeFood(e.id,e.name)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:14,padding:"4px 6px"}}>✕</button>
               </div>
             ))}
           </div>
@@ -902,7 +902,7 @@ export default function App(){
               <span style={{fontSize:12,color:C.muted}}>{fmtDate(w.date)}</span>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:14,fontWeight:700,color:C.orange}}>{w.kg} kg</span>
-                <button onClick={async()=>{const updated=wLog.filter((_,idx)=>idx!==(wLog.length-1-i));setWLog(updated);await ss("fp:weights",updated);}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,color:C.red,fontSize:11,padding:"3px 8px",cursor:"pointer"}}>✕</button>
+                <button onClick={async()=>{if(!window.confirm(`Remove ${w.kg}kg entry for ${fmtDate(w.date)}?`))return;const updated=wLog.filter((_,idx)=>idx!==(wLog.length-1-i));setWLog(updated);await ss("fp:weights",updated);}} style={{background:"none",border:`1px solid ${C.border}`,borderRadius:6,color:C.red,fontSize:11,padding:"3px 8px",cursor:"pointer"}}>✕</button>
               </div>
             </div>
           ))}
@@ -1012,6 +1012,7 @@ export default function App(){
                       </div>
                     </div>
                     {editMode&&<button onClick={async()=>{
+                      if(!window.confirm(`Remove "${e.name}" from this day?`))return;
                       const updated=dayDetail.entries.filter((_,idx)=>idx!==i);
                       await ss(`fp:day:${dayDetail.key}`,updated);
                       setDayDetail({...dayDetail,entries:updated,totals:sumE(updated)});
@@ -1099,21 +1100,32 @@ export default function App(){
                 const pct=Math.round((day.totals.cal/(targets?.calories||1))*100);
                 const isToday=day.key===today;
                 return(
-                  <div key={day.key} onClick={()=>setDayDetail(day)} style={{...crd,marginBottom:8,cursor:"pointer",position:"relative",overflow:"hidden"}}>
+                  <div key={day.key} style={{...crd,marginBottom:8,position:"relative",overflow:"hidden"}}>
                     {isToday&&<div style={{position:"absolute",top:10,right:10,background:C.orange,borderRadius:5,fontSize:8,fontWeight:700,color:"#fff",padding:"2px 7px",letterSpacing:"0.1em"}}>TODAY</div>}
-                    <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:1}}>{fmtDate(day.key)}</div>
-                    <div style={{fontSize:10,color:C.muted,marginBottom:8}}>{day.entries.length} items · tap to view</div>
-                    <div style={{height:4,borderRadius:99,background:C.subtle,overflow:"hidden",marginBottom:7}}>
-                      <div style={{height:"100%",width:`${Math.min(pct,100)}%`,borderRadius:99,background:pct>100?C.red:C.orange,transition:"width 0.4s"}}/>
+                    <div onClick={()=>setDayDetail(day)} style={{cursor:"pointer"}}>
+                      <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:1}}>{fmtDate(day.key)}</div>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:8}}>{day.entries.length} items · tap to view</div>
+                      <div style={{height:4,borderRadius:99,background:C.subtle,overflow:"hidden",marginBottom:7}}>
+                        <div style={{height:"100%",width:`${Math.min(pct,100)}%`,borderRadius:99,background:pct>100?C.red:C.orange,transition:"width 0.4s"}}/>
+                      </div>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:10,flexWrap:"wrap",gap:4}}>
+                        <span style={{color:C.orange,fontWeight:700}}>{day.totals.cal}cal</span>
+                        <span style={{color:C.cyan}}>{day.totals.protein}g pro</span>
+                        <span style={{color:C.violet}}>{day.totals.carbs}g carbs</span>
+                        <span style={{color:C.green}}>{day.totals.fat}g fat</span>
+                        <span style={{color:C.cyan}}>💧{Math.round((day.water||0)/100)/10}L</span>
+                        <span style={{color:pct>100?C.red:C.muted}}>{pct}%</span>
+                      </div>
                     </div>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,flexWrap:"wrap",gap:4}}>
-                      <span style={{color:C.orange,fontWeight:700}}>{day.totals.cal}cal</span>
-                      <span style={{color:C.cyan}}>{day.totals.protein}g pro</span>
-                      <span style={{color:C.violet}}>{day.totals.carbs}g carbs</span>
-                      <span style={{color:C.green}}>{day.totals.fat}g fat</span>
-                      <span style={{color:C.cyan}}>💧{Math.round((day.water||0)/100)/10}L</span>
-                      <span style={{color:pct>100?C.red:C.muted}}>{pct}%</span>
-                    </div>
+                    <button onClick={async(e)=>{
+                      e.stopPropagation();
+                      if(!window.confirm(`Delete the log for ${fmtDate(day.key)}? This cannot be undone.`)) return;
+                      localStorage.removeItem(`fp:day:${day.key}`);
+                      localStorage.removeItem(`fp:water:${day.key}`);
+                      setHistDays(prev=>prev.filter(d=>d.key!==day.key));
+                    }} style={{marginTop:10,background:"none",border:`1px solid ${C.border}`,borderRadius:8,color:C.red,fontSize:11,padding:"5px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",width:"100%"}}>
+                      🗑 Delete This Day
+                    </button>
                   </div>
                 );
               })}
