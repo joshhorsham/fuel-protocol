@@ -230,7 +230,23 @@ export default function App(){
   const [defGoal,setDefGoal]=useState(null); // persisted config
   const [dgDraft,setDgDraft]=useState({mode:"rate",kgPerWeek:"0.5",targetKg:"",targetDate:""}); // editing draft
 
-  const today=todayKey();
+  const today=todayKey(); // recalculates on every render via todayKey()
+
+  // ── Reset if date has changed since app opened ──
+  useEffect(()=>{
+    const interval=setInterval(async()=>{
+      const currentDay=todayKey();
+      if(currentDay!==today){
+        // Date has changed — load fresh entries for the new day
+        const e=await sg(`fp:day:${currentDay}`)||[];
+        const w=await sg(`fp:water:${currentDay}`)||0;
+        setEntries(e);
+        setWater(w);
+        setSavedToday(false);
+      }
+    },60000); // check every minute
+    return()=>clearInterval(interval);
+  },[today]);
 
   // ── Boot ──
   useEffect(()=>{
@@ -260,8 +276,8 @@ export default function App(){
   },[]);
 
   // ── Persist helpers ──
-  const saveEntries=async(e)=>{setEntries(e);await ss(`fp:day:${today}`,e);};
-  const saveWater=async(w)=>{setWater(w);await ss(`fp:water:${today}`,w);};
+  const saveEntries=async(e)=>{setEntries(e);await ss(`fp:day:${todayKey()}`,e);};
+  const saveWater=async(w)=>{setWater(w);await ss(`fp:water:${todayKey()}`,w);};
   const saveDefGoal=async(dg)=>{
     setDefGoal(dg);
     await ss("fp:deficitgoal",dg);
@@ -333,8 +349,9 @@ export default function App(){
 
   // ── Save Day ──
   const saveDay=async()=>{
-    await ss(`fp:day:${today}`,entries);
-    await ss(`fp:water:${today}`,water);
+    const currentDay=todayKey(); // always use current date, never stale
+    await ss(`fp:day:${currentDay}`,entries);
+    await ss(`fp:water:${currentDay}`,water);
     setSavedToday(true);
     setTimeout(()=>setSavedToday(false),2500);
   };
