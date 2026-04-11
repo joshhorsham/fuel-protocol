@@ -26,11 +26,17 @@ function calcTargets(s) {
 }
 
 // Given a deficitGoal config + TDEE, return derived numbers
-function resolveGoal(dg, tdee) {
-  if(!dg||!tdee) return null;
-  if(dg.mode==="rate") {
-    const dailyDeficit=Math.round((parseFloat(dg.kgPerWeek)||0)*7700/7);
-    const calsPerDay=tdee-dailyDeficit;
+async function aiCall(prompt,sys){
+  try {
+    const res=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,system:sys,messages:[{role:"user",content:prompt}]})});
+    const d=await res.json();
+    console.log("API response:", d);
+    return d.content?.map(b=>b.text||"").join("")||"";
+  } catch(e) {
+    console.error("API error:", e);
+    return "";
+  }
+}
     const weeksTo=dg.targetKg&&dailyDeficit>0 ? +((parseFloat(dg.targetKg)*7700)/(dailyDeficit*7)).toFixed(1) : null;
     const daysTo=weeksTo?Math.round(weeksTo*7):null;
     const arrivalDate=daysTo ? (() => { const d=new Date(); d.setDate(d.getDate()+daysTo); return d.toLocaleDateString("en-AU",{day:"numeric",month:"short",year:"numeric"}); })() : null;
