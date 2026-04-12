@@ -209,6 +209,7 @@ function safetyLabel(calsPerDay){
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App(){
+  const [darkMode,setDarkMode]=useState(()=>{try{const v=localStorage.getItem("fp:darkmode");return v?JSON.parse(v):false;}catch{return false;}});
   const [screen,setScreen]=useState("loading");
   const [nav,setNav]=useState("tracker");
   const [stats,setStats]=useState({weight:"",height:"",age:"",sex:"male",activity:"moderate",goal:"lose"});
@@ -431,7 +432,7 @@ export default function App(){
     input::placeholder{color:${C.muted}}
     input:focus{border-color:${C.red}88 !important;box-shadow:0 0 0 3px ${C.red}11}
     input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
-    input[type=date]::-webkit-calendar-picker-indicator{filter:${darkMode?"invert(0.4)":"invert(0.3)"}}
+    input[type=date]::-webkit-calendar-picker-indicator{filter:invert(0.3)}
     ::-webkit-scrollbar{width:3px} ::-webkit-scrollbar-track{background:${C.bg}} ::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px}
     button:active{transform:scale(0.97)}
     *{transition:background 0.2s,color 0.2s,border-color 0.2s}
