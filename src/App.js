@@ -49,7 +49,13 @@ function resolveGoal(dg, tdee) {
   return null;
 }
 
-const todayKey=()=>new Date().toISOString().slice(0,10);
+const todayKey=()=>{
+  const d=new Date();
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,"0");
+  const day=String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+};
 const fmtDate=(k)=>new Date(k+"T12:00:00").toLocaleDateString("en-AU",{weekday:"short",month:"short",day:"numeric"});
 const fmtLong=(k)=>new Date(k+"T12:00:00").toLocaleDateString("en-AU",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
 const sumE=(arr=[])=>arr.reduce((a,e)=>({cal:a.cal+(e.cal||0),protein:a.protein+(e.protein||0),carbs:a.carbs+(e.carbs||0),fat:a.fat+(e.fat||0)}),{cal:0,protein:0,carbs:0,fat:0});
@@ -212,6 +218,13 @@ export default function App(){
   const [newW,setNewW]=useState("");
   const [searchQ,setSearchQ]=useState("");
   const [recentSearches,setRecentSearches]=useState([]);
+  const [searchMode,setSearchMode]=useState("search"); // "search" | "recipe"
+  const [recipeName,setRecipeName]=useState("");
+  const [recipeIngredients,setRecipeIngredients]=useState([]);
+  const [recipeSearchQ,setRecipeSearchQ]=useState("");
+  const [recipeSearchR,setRecipeSearchR]=useState([]);
+  const [recipeSearchLoading,setRecipeSearchLoading]=useState(false);
+  const [recipeManual,setRecipeManual]=useState({name:"",cal:"",protein:"",carbs:"",fat:""});
   const [searchR,setSearchR]=useState([]);
   const [searchLoading,setSearchLoading]=useState(false);
   const [suggestions,setSuggestions]=useState([]);
@@ -253,8 +266,8 @@ export default function App(){
     (async()=>{
       const cfg=await sg("fp:settings");
       if(cfg){setStats(cfg.stats);setTargets(cfg.targets);}
-      const e=await sg(`fp:day:${today}`)||[];
-      const w=await sg(`fp:water:${today}`)||0;
+      const e=await sg(`fp:day:${todayKey()}`)||[];
+      const w=await sg(`fp:water:${todayKey()}`)||0;
       const t=await sg("fp:templates")||[];
       const wl=await sg("fp:weights")||[];
       const dg=await sg("fp:deficitgoal");
@@ -319,7 +332,7 @@ export default function App(){
   // ── Weight ──
   const logWeight=async()=>{
     if(!newW)return;
-    const wl=[...wLog,{date:today,kg:parseFloat(newW)}].sort((a,b)=>a.date.localeCompare(b.date));
+    const wl=[...wLog,{date:todayKey(),kg:parseFloat(newW)}].sort((a,b)=>a.date.localeCompare(b.date));
     setWLog(wl);await ss("fp:weights",wl);setNewW("");
   };
 
@@ -352,9 +365,23 @@ export default function App(){
     const currentDay=todayKey(); // always use current date, never stale
     await ss(`fp:day:${currentDay}`,entries);
     await ss(`fp:water:${currentDay}`,water);
+    setHistDays([]); // clear cached history so Load Logs fetches fresh
     setSavedToday(true);
     setTimeout(()=>setSavedToday(false),2500);
   };
+
+  // ── Recipe ingredient search ──
+  const doRecipeSearch=async()=>{
+    if(!recipeSearchQ.trim())return;
+    setRecipeSearchLoading(true);setRecipeSearchR([]);
+    const r=await searchFood(recipeSearchQ);
+    setRecipeSearchR(r);setRecipeSearchLoading(false);
+  };
+  const addIngredient=(item)=>{
+    setRecipeIngredients(prev=>[...prev,{id:Date.now(),name:item.name,cal:item.cal,protein:item.protein||0,carbs:item.carbs||0,fat:item.fat||0}]);
+  };
+  const removeIngredient=(id)=>setRecipeIngredients(prev=>prev.filter(i=>i.id!==id));
+  const recipeTotals=recipeIngredients.reduce((a,i)=>({cal:a.cal+i.cal,protein:a.protein+i.protein,carbs:a.carbs+i.carbs,fat:a.fat+i.fat}),{cal:0,protein:0,carbs:0,fat:0});
 
   // ── Search ──
   const doSearch=async()=>{
@@ -669,60 +696,172 @@ export default function App(){
       {nav==="search"&&(
         <div className="fi" style={{padding:"18px 14px"}}>
           <div style={{fontSize:9,letterSpacing:"0.3em",color:C.orange,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
-          <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:4}}>Food Search</div>
-          <div style={{fontSize:10,color:C.muted,marginBottom:12}}>Coles · Woolworths · Aldi · Fast food · Uber Eats — AI powered</div>
-          <div style={{display:"flex",gap:7,marginBottom:14}}>
-            <input placeholder="e.g. Coles chicken breast, Big Mac…" value={searchQ} onChange={e=>setSearchQ(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doSearch()} style={{...iStyle,flex:1}}/>
-            <button onClick={doSearch} disabled={searchLoading} style={{...btnFn(),width:"auto",padding:"10px 14px",flexShrink:0}}>{searchLoading?<Spin/>:"Go"}</button>
+          <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:10}}>Search & Build</div>
+
+          {/* Mode tabs */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+            <button onClick={()=>setSearchMode("search")} style={{...chipFn(searchMode==="search",C.orange),padding:"10px 8px",fontSize:11}}>
+              🔍 Food Search
+            </button>
+            <button onClick={()=>setSearchMode("recipe")} style={{...chipFn(searchMode==="recipe",C.violet),padding:"10px 8px",fontSize:11}}>
+              🍳 Recipe Builder
+            </button>
           </div>
-          <div style={{marginBottom:14}}>
-            {recentSearches.length>0?(
-              <>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                  <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",textTransform:"uppercase"}}>Recent Searches</div>
-                  <button onClick={async()=>{setRecentSearches([]);await ss("fp:recentsearches",[]);}} style={{background:"none",border:"none",color:C.muted,fontSize:9,cursor:"pointer",padding:0}}>Clear all</button>
-                </div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                  {recentSearches.map(q=>(
-                    <button key={q} onClick={()=>setSearchQ(q)} style={{...chipFn(searchQ===q,C.cyan),padding:"5px 9px",fontSize:10}}>{q}</button>
-                  ))}
-                </div>
-              </>
-            ):(
-              <>
-                <div style={{fontSize:9,color:C.muted,marginBottom:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>Suggested searches</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
-                  {["Big Mac","Coles Greek Yoghurt","Woolworths chicken breast","Aldi protein bar","Subway footlong","KFC Original Piece","Boost Mango","Weet-Bix"].map(q=>(
-                    <button key={q} onClick={()=>setSearchQ(q)} style={{...chipFn(searchQ===q,C.cyan),padding:"5px 9px",fontSize:10}}>{q}</button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-          {searchLoading&&<div style={{textAlign:"center",padding:"28px 0",color:C.muted,fontSize:12}}><Spin col={C.orange}/><br/><span style={{display:"block",marginTop:8}}>Searching nutrition data…</span></div>}
-          {searchR.map((r,i)=>(
-            <div key={i} style={{...crd,marginBottom:8}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>{r.name}</div>
-                  {r.brand&&<div style={{fontSize:10,color:C.orange,marginBottom:1}}>{r.brand}</div>}
-                  {r.serving&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>per {r.serving}</div>}
-                  <div style={{display:"flex",gap:10,fontSize:11,flexWrap:"wrap"}}>
-                    <span style={{color:C.orange,fontWeight:700}}>{r.cal}cal</span>
-                    <span style={{color:C.cyan}}>{r.protein}g pro</span>
-                    <span style={{color:C.violet}}>{r.carbs}g carbs</span>
-                    <span style={{color:C.green}}>{r.fat}g fat</span>
+
+          {/* ── FOOD SEARCH MODE ── */}
+          {searchMode==="search"&&(
+            <>
+              <div style={{fontSize:10,color:C.muted,marginBottom:12}}>Coles · Woolworths · Aldi · Fast food · Uber Eats — AI powered</div>
+              <div style={{display:"flex",gap:7,marginBottom:14}}>
+                <input placeholder="e.g. Coles chicken breast, Big Mac…" value={searchQ} onChange={e=>setSearchQ(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doSearch()} style={{...iStyle,flex:1}}/>
+                <button onClick={doSearch} disabled={searchLoading} style={{...btnFn(),width:"auto",padding:"10px 14px",flexShrink:0}}>{searchLoading?<Spin/>:"Go"}</button>
+              </div>
+              <div style={{marginBottom:14}}>
+                {recentSearches.length>0?(
+                  <>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <div style={{fontSize:9,color:C.muted,letterSpacing:"0.08em",textTransform:"uppercase"}}>Recent Searches</div>
+                      <button onClick={async()=>{setRecentSearches([]);await ss("fp:recentsearches",[]);}} style={{background:"none",border:"none",color:C.muted,fontSize:9,cursor:"pointer",padding:0}}>Clear all</button>
+                    </div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                      {recentSearches.map(q=>(
+                        <button key={q} onClick={()=>setSearchQ(q)} style={{...chipFn(searchQ===q,C.cyan),padding:"5px 9px",fontSize:10}}>{q}</button>
+                      ))}
+                    </div>
+                  </>
+                ):(
+                  <>
+                    <div style={{fontSize:9,color:C.muted,marginBottom:6,letterSpacing:"0.08em",textTransform:"uppercase"}}>Suggested searches</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                      {["Big Mac","Coles Greek Yoghurt","Woolworths chicken breast","Aldi protein bar","Subway footlong","KFC Original Piece","Boost Mango","Weet-Bix"].map(q=>(
+                        <button key={q} onClick={()=>setSearchQ(q)} style={{...chipFn(searchQ===q,C.cyan),padding:"5px 9px",fontSize:10}}>{q}</button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+              {searchLoading&&<div style={{textAlign:"center",padding:"28px 0",color:C.muted,fontSize:12}}><Spin col={C.orange}/><br/><span style={{display:"block",marginTop:8}}>Searching nutrition data…</span></div>}
+              {searchR.map((r,i)=>(
+                <div key={i} style={{...crd,marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{r.name}</div>
+                      {r.brand&&<div style={{fontSize:10,color:C.orange,marginBottom:1}}>{r.brand}</div>}
+                      {r.serving&&<div style={{fontSize:10,color:C.muted,marginBottom:6}}>per {r.serving}</div>}
+                      <div style={{display:"flex",gap:10,fontSize:11,flexWrap:"wrap"}}>
+                        <span style={{color:C.orange,fontWeight:700}}>{r.cal}cal</span>
+                        <span style={{color:C.cyan}}>{r.protein}g pro</span>
+                        <span style={{color:C.violet}}>{r.carbs}g carbs</span>
+                        <span style={{color:C.green}}>{r.fat}g fat</span>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:10}}>
+                      <button onClick={()=>addFood({name:r.name,cal:r.cal,protein:r.protein,carbs:r.carbs,fat:r.fat})} style={{background:C.orange,border:"none",borderRadius:8,color:"#fff",fontSize:11,padding:"6px 11px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700}}>+ Log</button>
+                      <button onClick={()=>saveTpl({name:r.name,cal:r.cal,protein:r.protein,carbs:r.carbs,fat:r.fat})} style={{background:C.subtle,border:`1px solid ${C.border}`,borderRadius:8,color:C.violet,fontSize:10,padding:"5px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>💾 Save</button>
+                    </div>
                   </div>
                 </div>
-                <div style={{display:"flex",flexDirection:"column",gap:5,marginLeft:10}}>
-                  <button onClick={()=>addFood({name:r.name,cal:r.cal,protein:r.protein,carbs:r.carbs,fat:r.fat})} style={{background:C.orange,border:"none",borderRadius:8,color:"#fff",fontSize:11,padding:"6px 11px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700}}>+ Log</button>
-                  <button onClick={()=>saveTpl({name:r.name,cal:r.cal,protein:r.protein,carbs:r.carbs,fat:r.fat})} style={{background:C.subtle,border:`1px solid ${C.border}`,borderRadius:8,color:C.violet,fontSize:10,padding:"5px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>💾 Save</button>
-                </div>
+              ))}
+              {!searchLoading&&searchR.length===0&&searchQ&&<div style={{textAlign:"center",color:C.muted,fontSize:12,padding:"20px 0"}}>No results — tap Go to search!</div>}
+              {!searchLoading&&searchR.length===0&&!searchQ&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"28px 0"}}>Search any food to get full nutrition info</div>}
+            </>
+          )}
+
+          {/* ── RECIPE BUILDER MODE ── */}
+          {searchMode==="recipe"&&(
+            <>
+              {/* Recipe name */}
+              <div style={{...crd,marginBottom:10,border:`1px solid ${C.violet}44`}}>
+                <div style={{fontSize:10,color:C.violet,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Recipe Name</div>
+                <input placeholder="e.g. Chicken Stir Fry, Protein Smoothie…" value={recipeName} onChange={e=>setRecipeName(e.target.value)} style={iStyle}/>
               </div>
-            </div>
-          ))}
-          {!searchLoading&&searchR.length===0&&searchQ&&<div style={{textAlign:"center",color:C.muted,fontSize:12,padding:"20px 0"}}>No results — tap Go to search!</div>}
-          {!searchLoading&&searchR.length===0&&!searchQ&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"28px 0"}}>Search any food to get full nutrition info</div>}
+
+              {/* Search ingredients */}
+              <div style={{...crd,marginBottom:10}}>
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Search Ingredients</div>
+                <div style={{display:"flex",gap:7,marginBottom:8}}>
+                  <input placeholder="e.g. chicken breast, brown rice…" value={recipeSearchQ} onChange={e=>setRecipeSearchQ(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doRecipeSearch()} style={{...iStyle,flex:1}}/>
+                  <button onClick={doRecipeSearch} disabled={recipeSearchLoading} style={{...btnFn(C.cyan),width:"auto",padding:"10px 12px",flexShrink:0}}>{recipeSearchLoading?<Spin col={C.cyan}/>:"Find"}</button>
+                </div>
+                {recipeSearchLoading&&<div style={{textAlign:"center",padding:"12px 0",color:C.muted,fontSize:11}}><Spin col={C.cyan}/> Searching…</div>}
+                {recipeSearchR.map((r,i)=>(
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.subtle,borderRadius:9,padding:"9px 11px",marginBottom:5,border:`1px solid ${C.border}`}}>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:12,fontWeight:700,color:C.text}}>{r.name}</div>
+                      <div style={{fontSize:10,color:C.muted}}><span style={{color:C.orange}}>{r.cal}cal</span> · <span style={{color:C.cyan}}>{r.protein}g pro</span> · {r.carbs}g carbs · {r.fat}g fat</div>
+                    </div>
+                    <button onClick={()=>{addIngredient(r);setRecipeSearchR([]);setRecipeSearchQ("");}}
+                      style={{background:C.violet,border:"none",borderRadius:7,color:"#fff",fontSize:11,padding:"5px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",marginLeft:8,flexShrink:0}}>+ Add</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Manual ingredient entry */}
+              <div style={{...crd,marginBottom:10}}>
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Or Enter Manually</div>
+                <input placeholder="Ingredient name" value={recipeManual.name} onChange={e=>setRecipeManual(p=>({...p,name:e.target.value}))} style={{...iStyle,marginBottom:7}}/>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:8}}>
+                  {[["cal","Cals"],["protein","Pro"],["carbs","Carbs"],["fat","Fat"]].map(([f,p])=>(
+                    <input key={f} type="number" placeholder={p} value={recipeManual[f]||""} onChange={e=>setRecipeManual(prev=>({...prev,[f]:e.target.value}))} style={{...iStyle,fontSize:11}}/>
+                  ))}
+                </div>
+                <button onClick={()=>{
+                  if(!recipeManual.name||!recipeManual.cal) return;
+                  addIngredient({name:recipeManual.name,cal:parseInt(recipeManual.cal)||0,protein:parseInt(recipeManual.protein)||0,carbs:parseInt(recipeManual.carbs)||0,fat:parseInt(recipeManual.fat)||0});
+                  setRecipeManual({name:"",cal:"",protein:"",carbs:"",fat:""});
+                }} style={btnFn(C.violet)}>+ Add Ingredient</button>
+              </div>
+
+              {/* Ingredients list + totals */}
+              {recipeIngredients.length>0&&(
+                <div style={{...crd,marginBottom:10,border:`1px solid ${C.violet}33`}}>
+                  <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>
+                    Ingredients · {recipeIngredients.length} items
+                  </div>
+                  {recipeIngredients.map((ing)=>(
+                    <div key={ing.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.subtle,borderRadius:8,padding:"8px 10px",marginBottom:5,border:`1px solid ${C.border}`}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:12,fontWeight:700,color:C.text}}>{ing.name}</div>
+                        <div style={{fontSize:10,color:C.muted}}><span style={{color:C.orange}}>{ing.cal}cal</span>{ing.protein>0&&<span> · <span style={{color:C.cyan}}>{ing.protein}g pro</span></span>}{ing.carbs>0&&<span> · {ing.carbs}g carbs</span>}{ing.fat>0&&<span> · {ing.fat}g fat</span>}</div>
+                      </div>
+                      <button onClick={()=>removeIngredient(ing.id)} style={{background:"none",border:"none",color:C.red,cursor:"pointer",fontSize:14,padding:"2px 6px",marginLeft:6}}>✕</button>
+                    </div>
+                  ))}
+                  {/* Totals */}
+                  <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Recipe Totals</div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
+                      {[{l:"Calories",v:`${recipeTotals.cal}`,c:C.orange},{l:"Protein",v:`${recipeTotals.protein}g`,c:C.cyan},{l:"Carbs",v:`${recipeTotals.carbs}g`,c:C.violet},{l:"Fat",v:`${recipeTotals.fat}g`,c:C.green}].map((x,i)=>(
+                        <div key={i} style={{background:C.bg,borderRadius:8,padding:"7px 6px",textAlign:"center",border:`1px solid ${C.border}`}}>
+                          <div style={{fontSize:8,color:C.muted,textTransform:"uppercase",marginBottom:2}}>{x.l}</div>
+                          <div style={{fontSize:13,fontWeight:700,color:x.c}}>{x.v}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              {recipeIngredients.length>0&&(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  <button onClick={async()=>{
+                    const name=recipeName||"My Recipe";
+                    await addFood({name,cal:recipeTotals.cal,protein:recipeTotals.protein,carbs:recipeTotals.carbs,fat:recipeTotals.fat});
+                    setRecipeIngredients([]);setRecipeName("");setRecipeSearchR([]);
+                    setSearchMode("search");setNav("tracker");
+                  }} style={btnFn(C.orange)}>+ Log as Meal</button>
+                  <button onClick={async()=>{
+                    const name=recipeName||"My Recipe";
+                    await saveTpl({name,cal:recipeTotals.cal,protein:recipeTotals.protein,carbs:recipeTotals.carbs,fat:recipeTotals.fat});
+                    setRecipeIngredients([]);setRecipeName("");setRecipeSearchR([]);
+                    alert(`"${name}" saved as a template!`);
+                  }} style={btnFn(C.violet)}>💾 Save as Template</button>
+                </div>
+              )}
+              {recipeIngredients.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"20px 0"}}>Search or manually enter ingredients above to build your recipe</div>}
+            </>
+          )}
         </div>
       )}
 
