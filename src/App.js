@@ -427,6 +427,10 @@ export default function App(){
   // actual deficit today
   const todayDeficit=tdee>0?tdee-totals.cal:null;
 
+  // ── Apply theme ──
+  const _t=getStyles(darkMode);
+  C=_t.C; pStyle=_t.pStyle; crd=_t.crd; iStyle=_t.iStyle; chipFn=_t.chipFn; btnFn=_t.btnFn;
+
   const STYLES=`
     @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
     @keyframes spin{to{transform:rotate(360deg)}}
