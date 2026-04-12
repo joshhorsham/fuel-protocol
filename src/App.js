@@ -90,23 +90,15 @@ async function getMeals(rem,tgt){
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const LIGHT={bg:"#f5f5f7",surface:"#ffffff",card:"#ffffff",border:"#e5e5ea",red:"#e8372a",redLight:"#ff6b5e",cyan:"#007aff",violet:"#5856d6",green:"#34c759",yellow:"#ff9500",text:"#1c1c1e",muted:"#8e8e93",subtle:"#f2f2f7",shadow:"0 2px 16px rgba(0,0,0,0.08)"};
 const DARK={bg:"#07090f",surface:"#0e1118",card:"#131a24",border:"#1e2d3f",red:"#ff4757",redLight:"#ff6b78",cyan:"#00d4ff",violet:"#7c5cfc",green:"#00e5a0",yellow:"#fbbf24",text:"#edf2f8",muted:"#4a6078",subtle:"#172030",shadow:"0 4px 24px rgba(0,0,0,0.3)"};
-// C is set dynamically in App based on darkMode state — components use C via closure
-let C=LIGHT;
-const getStyles=(dark)=>{
-  const t=dark?DARK:LIGHT;
-  const pStyle={minHeight:"100vh",background:t.bg,fontFamily:"'DM Mono',monospace",color:t.text,maxWidth:430,margin:"0 auto",paddingBottom:82};
-  const crd={background:t.card,borderRadius:18,border:`1px solid ${t.border}`,padding:"15px",boxShadow:t.shadow};
-  const iStyle={background:t.subtle,border:`1px solid ${t.border}`,borderRadius:10,color:t.text,padding:"10px 12px",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"'DM Mono',monospace"};
-  const chipFn=(on,col=t.red)=>({border:`1px solid ${on?col:t.border}`,borderRadius:9,padding:"8px 6px",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700,background:on?col+"22":t.subtle,color:on?col:t.muted,transition:"all 0.15s",letterSpacing:"0.03em"});
-  const btnFn=(col=t.red)=>({background:col,border:"none",borderRadius:50,color:"#fff",padding:"13px 18px",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%",fontFamily:"'DM Mono',monospace",letterSpacing:"0.03em",boxShadow:`0 4px 16px ${col}55`});
-  return{pStyle,crd,iStyle,chipFn,btnFn,C:t};
+const useTheme=(dark)=>{
+  const C=dark?DARK:LIGHT;
+  const pStyle={minHeight:"100vh",background:C.bg,fontFamily:"'DM Mono',monospace",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:82};
+  const crd={background:C.card,borderRadius:18,border:`1px solid ${C.border}`,padding:"15px",boxShadow:C.shadow};
+  const iStyle={background:C.subtle,border:`1px solid ${C.border}`,borderRadius:10,color:C.text,padding:"10px 12px",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"'DM Mono',monospace"};
+  const chipFn=(on,col=C.red)=>({border:`1px solid ${on?col:C.border}`,borderRadius:9,padding:"8px 6px",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700,background:on?col+"22":C.subtle,color:on?col:C.muted,transition:"all 0.15s",letterSpacing:"0.03em"});
+  const btnFn=(col=C.red)=>({background:col,border:"none",borderRadius:50,color:"#fff",padding:"13px 18px",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%",fontFamily:"'DM Mono',monospace",letterSpacing:"0.03em",boxShadow:`0 4px 16px ${col}55`});
+  return{C,pStyle,crd,iStyle,chipFn,btnFn};
 };
-// fallback statics (overridden in App)
-let pStyle={minHeight:"100vh",background:LIGHT.bg,fontFamily:"'DM Mono',monospace",color:LIGHT.text,maxWidth:430,margin:"0 auto",paddingBottom:82};
-let crd={background:LIGHT.card,borderRadius:18,border:`1px solid ${LIGHT.border}`,padding:"15px",boxShadow:LIGHT.shadow};
-let iStyle={background:LIGHT.subtle,border:`1px solid ${LIGHT.border}`,borderRadius:10,color:LIGHT.text,padding:"10px 12px",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"'DM Mono',monospace"};
-let chipFn=(on,col=LIGHT.red)=>({border:`1px solid ${on?col:LIGHT.border}`,borderRadius:9,padding:"8px 6px",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700,background:on?col+"22":LIGHT.subtle,color:on?col:LIGHT.muted,transition:"all 0.15s",letterSpacing:"0.03em"});
-let btnFn=(col=LIGHT.red)=>({background:col,border:"none",borderRadius:50,color:"#fff",padding:"13px 18px",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%",fontFamily:"'DM Mono',monospace",letterSpacing:"0.03em",boxShadow:`0 4px 16px ${col}55`});
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function Ring({value,max,color,size=68,stroke=6,label,sub}){
@@ -428,8 +420,7 @@ export default function App(){
   const todayDeficit=tdee>0?tdee-totals.cal:null;
 
   // ── Apply theme ──
-  const _t=getStyles(darkMode);
-  C=_t.C; pStyle=_t.pStyle; crd=_t.crd; iStyle=_t.iStyle; chipFn=_t.chipFn; btnFn=_t.btnFn;
+  const {C,pStyle,crd,iStyle,chipFn,btnFn}=useTheme(darkMode);
 
   const STYLES=`
     @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap');
