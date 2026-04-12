@@ -59,7 +59,8 @@ const todayKey=()=>{
 const fmtDate=(k)=>new Date(k+"T12:00:00").toLocaleDateString("en-AU",{weekday:"short",month:"short",day:"numeric"});
 const fmtLong=(k)=>new Date(k+"T12:00:00").toLocaleDateString("en-AU",{weekday:"long",month:"long",day:"numeric",year:"numeric"});
 const sumE=(arr=[])=>arr.reduce((a,e)=>({cal:a.cal+(e.cal||0),protein:a.protein+(e.protein||0),carbs:a.carbs+(e.carbs||0),fat:a.fat+(e.fat||0)}),{cal:0,protein:0,carbs:0,fat:0});
-const minDate=()=>{ const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); };
+const localDateKey=(d=new Date())=>{const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,"0");const day=String(d.getDate()).padStart(2,"0");return `${y}-${m}-${day}`;};
+const minDate=()=>{ const d=new Date(); d.setDate(d.getDate()+1); return localDateKey(d); };
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 const sg=async(k)=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v):null;}catch{return null;}};
@@ -90,14 +91,16 @@ async function getMeals(rem,tgt){
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const LIGHT={bg:"#f5f5f7",surface:"#ffffff",card:"#ffffff",border:"#e5e5ea",red:"#e8372a",redLight:"#ff6b5e",cyan:"#007aff",violet:"#5856d6",green:"#34c759",yellow:"#ff9500",text:"#1c1c1e",muted:"#8e8e93",subtle:"#f2f2f7",shadow:"0 2px 16px rgba(0,0,0,0.08)"};
 const DARK={bg:"#07090f",surface:"#0e1118",card:"#131a24",border:"#1e2d3f",red:"#ff4757",redLight:"#ff6b78",cyan:"#00d4ff",violet:"#7c5cfc",green:"#00e5a0",yellow:"#fbbf24",text:"#edf2f8",muted:"#4a6078",subtle:"#172030",shadow:"0 4px 24px rgba(0,0,0,0.3)"};
+// Global C — defaults to LIGHT, updated per render inside App
+let C=LIGHT;
 const useTheme=(dark)=>{
-  const C=dark?DARK:LIGHT;
-  const pStyle={minHeight:"100vh",background:C.bg,fontFamily:"'DM Mono',monospace",color:C.text,maxWidth:430,margin:"0 auto",paddingBottom:82};
-  const crd={background:C.card,borderRadius:18,border:`1px solid ${C.border}`,padding:"15px",boxShadow:C.shadow};
-  const iStyle={background:C.subtle,border:`1px solid ${C.border}`,borderRadius:10,color:C.text,padding:"10px 12px",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"'DM Mono',monospace"};
-  const chipFn=(on,col=C.red)=>({border:`1px solid ${on?col:C.border}`,borderRadius:9,padding:"8px 6px",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700,background:on?col+"22":C.subtle,color:on?col:C.muted,transition:"all 0.15s",letterSpacing:"0.03em"});
-  const btnFn=(col=C.red)=>({background:col,border:"none",borderRadius:50,color:"#fff",padding:"13px 18px",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%",fontFamily:"'DM Mono',monospace",letterSpacing:"0.03em",boxShadow:`0 4px 16px ${col}55`});
-  return{C,pStyle,crd,iStyle,chipFn,btnFn};
+  const t=dark?DARK:LIGHT;
+  const pStyle={minHeight:"100vh",background:t.bg,fontFamily:"'DM Mono',monospace",color:t.text,maxWidth:430,margin:"0 auto",paddingBottom:82};
+  const crd={background:t.card,borderRadius:18,border:`1px solid ${t.border}`,padding:"15px",boxShadow:t.shadow};
+  const iStyle={background:t.subtle,border:`1px solid ${t.border}`,borderRadius:10,color:t.text,padding:"10px 12px",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"'DM Mono',monospace"};
+  const chipFn=(on,col=t.red)=>({border:`1px solid ${on?col:t.border}`,borderRadius:9,padding:"8px 6px",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace",fontWeight:700,background:on?col+"22":t.subtle,color:on?col:t.muted,transition:"all 0.15s",letterSpacing:"0.03em"});
+  const btnFn=(col=t.red)=>({background:col,border:"none",borderRadius:50,color:"#fff",padding:"13px 18px",fontSize:13,fontWeight:700,cursor:"pointer",width:"100%",fontFamily:"'DM Mono',monospace",letterSpacing:"0.03em",boxShadow:`0 4px 16px ${col}55`});
+  return{C:t,pStyle,crd,iStyle,chipFn,btnFn};
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -171,26 +174,14 @@ function GoalRing({pct,color,size=110,stroke=9,label,sub}){
   );
 }
 
-function Spin({col=C.red}){
+function Spin({col="#e8372a"}){
   return <span style={{display:"inline-block",width:14,height:14,border:`2px solid ${col}33`,borderTop:`2px solid ${col}`,borderRadius:"50%",animation:"spin 0.7s linear infinite",verticalAlign:"middle"}}/>;
 }
 
-function NavBar({active,onChange}){
-  return(
-    <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:C.surface,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:100}}>
-      {NAV.map(n=>(
-        <button key={n.id} onClick={()=>onChange(n.id)} style={{flex:1,background:"none",border:"none",padding:"9px 2px 11px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-          <span style={{fontSize:17}}>{n.icon}</span>
-          <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",color:active===n.id?C.red:C.muted,textTransform:"uppercase"}}>{n.label}</span>
-          {active===n.id&&<div style={{width:14,height:2,borderRadius:1,background:C.red}}/>}
-        </button>
-      ))}
-    </div>
-  );
-}
+
 
 // ─── Stat tile ────────────────────────────────────────────────────────────────
-function Tile({label,value,sub,color=C.text}){
+function Tile({label,value,sub,color="#1c1c1e"}){
   return(
     <div style={{background:C.subtle,borderRadius:12,padding:"10px 11px",border:`1px solid ${C.border}`}}>
       <div style={{fontSize:8,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{label}</div>
@@ -202,8 +193,8 @@ function Tile({label,value,sub,color=C.text}){
 
 // ─── Safety check ─────────────────────────────────────────────────────────────
 function safetyLabel(calsPerDay){
-  if(calsPerDay<1000) return {text:"⚠️ Below safe minimum (1000 kcal). Consider a smaller deficit.",color:C.red};
-  if(calsPerDay<1200) return {text:"⚠️ Very aggressive — consult a health professional.",color:C.yellow};
+  if(calsPerDay<1000) return {text:"⚠️ Below safe minimum (1000 kcal). Consider a smaller deficit.",color:C.red||"#e8372a"};
+  if(calsPerDay<1200) return {text:"⚠️ Very aggressive — consult a health professional.",color:C.yellow||"#ff9500"};
   return null;
 }
 
@@ -284,7 +275,7 @@ export default function App(){
       if(dg){setDefGoal(dg);setDgDraft(dg);}
       let s=0,d=new Date();
       for(let i=0;i<365;i++){
-        const k=d.toISOString().slice(0,10);
+        const k=localDateKey(d);
         const de=await sg(`fp:day:${k}`)||[];
         if(de.length===0&&k!==today)break;
         if(de.length>0)s++;
@@ -359,7 +350,7 @@ export default function App(){
     const days=[];
     for(let i=6;i>=0;i--){
       const d=new Date();d.setDate(d.getDate()-i);
-      const k=d.toISOString().slice(0,10);
+      const k=localDateKey(d);
       const e=await sg(`fp:day:${k}`)||[];
       const w=await sg(`fp:water:${k}`)||0;
       days.push({key:k,label:d.toLocaleDateString("en-AU",{weekday:"short"}),totals:sumE(e),water:w});
@@ -452,7 +443,7 @@ export default function App(){
       <style>{STYLES}</style>
       <div style={{padding:"24px 20px"}}>
         <div style={{marginBottom:32,paddingTop:24,textAlign:"center"}}>
-          <div style={{display:"inline-block",background:"linear-gradient(135deg,#ff6b2b22,#7c5cfc22)",border:"1px solid #ff6b2b44",borderRadius:14,padding:"6px 16px",fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase",marginBottom:14}}>FUEL PROTOCOL</div>
+          <div style={{display:"inline-block",background:`linear-gradient(135deg,${C.red}22,${C.violet}22)`,border:`1px solid ${C.red}44`,borderRadius:14,padding:"6px 16px",fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase",marginBottom:14}}>FUEL PROTOCOL</div>
           <div style={{fontSize:32,fontWeight:700,color:C.text,lineHeight:1.1,marginBottom:8}}>Set your<br/><span style={{color:C.red}}>targets</span></div>
           <div style={{fontSize:11,color:C.muted}}>Enter your details to calculate daily calorie and macro targets</div>
         </div>
@@ -944,7 +935,7 @@ export default function App(){
                 <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
                   {[["1 month",30],["3 months",90],["6 months",180],["1 year",365]].map(([l,days])=>{
                     const d=new Date();d.setDate(d.getDate()+days);
-                    const v=d.toISOString().slice(0,10);
+                    const v=localDateKey(d);
                     return <button key={l} onClick={()=>setDgDraft(dr=>({...dr,targetDate:v}))} style={{...chipFn(dgDraft.targetDate===v,C.violet),padding:"5px 10px",fontSize:10}}>{l}</button>;
                   })}
                 </div>
