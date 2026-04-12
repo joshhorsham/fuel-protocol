@@ -91,10 +91,11 @@ async function getMeals(rem,tgt){
 // ─── Theme ────────────────────────────────────────────────────────────────────
 const LIGHT={bg:"#f5f5f7",surface:"#ffffff",card:"#ffffff",border:"#e5e5ea",red:"#e8372a",redLight:"#ff6b5e",cyan:"#007aff",violet:"#5856d6",green:"#34c759",yellow:"#ff9500",text:"#1c1c1e",muted:"#8e8e93",subtle:"#f2f2f7",shadow:"0 2px 16px rgba(0,0,0,0.08)"};
 const DARK={bg:"#07090f",surface:"#0e1118",card:"#131a24",border:"#1e2d3f",red:"#ff4757",redLight:"#ff6b78",cyan:"#00d4ff",violet:"#7c5cfc",green:"#00e5a0",yellow:"#fbbf24",text:"#edf2f8",muted:"#4a6078",subtle:"#172030",shadow:"0 4px 24px rgba(0,0,0,0.3)"};
-// Global C — defaults to LIGHT, updated per render inside App
+// Global C — defaults to LIGHT, updated each render by useTheme so all sub-components stay in sync
 let C=LIGHT;
 const useTheme=(dark)=>{
   const t=dark?DARK:LIGHT;
+  C=t; // update global so all sub-components (Ring, Bar, Tile etc) use correct theme
   const pStyle={minHeight:"100vh",background:t.bg,fontFamily:"'DM Mono',monospace",color:t.text,maxWidth:430,margin:"0 auto",paddingBottom:82};
   const crd={background:t.card,borderRadius:18,border:`1px solid ${t.border}`,padding:"15px",boxShadow:t.shadow};
   const iStyle={background:t.subtle,border:`1px solid ${t.border}`,borderRadius:10,color:t.text,padding:"10px 12px",fontSize:13,outline:"none",width:"100%",boxSizing:"border-box",fontFamily:"'DM Mono',monospace"};
@@ -181,20 +182,142 @@ function Spin({col="#e8372a"}){
 
 
 // ─── Stat tile ────────────────────────────────────────────────────────────────
-function Tile({label,value,sub,color="#1c1c1e"}){
+function Tile({label,value,sub,color}){
+  const col=color||C.text;
   return(
     <div style={{background:C.subtle,borderRadius:12,padding:"10px 11px",border:`1px solid ${C.border}`}}>
       <div style={{fontSize:8,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:3}}>{label}</div>
-      <div style={{fontSize:14,fontWeight:700,color}}>{value}</div>
+      <div style={{fontSize:14,fontWeight:700,color:col}}>{value}</div>
       {sub&&<div style={{fontSize:9,color:C.muted,marginTop:1}}>{sub}</div>}
+    </div>
+  );
+}
+
+const Logo=({size=28})=>(
+  <svg width={size} height={size} viewBox="0 0 680 680" style={{flexShrink:0}}>
+    <circle cx="340" cy="340" r="310" fill="#111111"/>
+    <circle cx="340" cy="340" r="310" fill="none" stroke="#e8372a" strokeWidth="2.5"/>
+    <circle cx="340" cy="340" r="300" fill="none" stroke="#e8372a" strokeWidth="0.6" opacity="0.3"/>
+    <g stroke="#ffffff" strokeWidth="1" opacity="0.2">
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(6 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(12 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(18 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(24 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(36 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(42 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(48 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(54 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(66 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(72 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(78 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(84 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(96 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(102 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(108 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(114 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(126 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(132 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(138 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(144 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(156 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(162 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(168 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(174 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(186 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(192 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(198 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(204 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(216 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(222 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(228 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(234 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(246 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(252 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(258 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(264 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(276 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(282 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(288 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(294 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(306 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(312 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(318 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(324 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(336 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(342 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(348 340 340)"/>
+      <line x1="340" y1="30" x2="340" y2="44" transform="rotate(354 340 340)"/>
+    </g>
+    <line x1="340" y1="30" x2="340" y2="60" stroke="#e8372a" strokeWidth="3.5" transform="rotate(0 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="55" stroke="#ffffff" strokeWidth="2.5" opacity="0.85" transform="rotate(30 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="55" stroke="#ffffff" strokeWidth="2.5" opacity="0.85" transform="rotate(60 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="60" stroke="#e8372a" strokeWidth="3.5" transform="rotate(90 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="55" stroke="#ffffff" strokeWidth="2.5" opacity="0.85" transform="rotate(120 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="55" stroke="#ffffff" strokeWidth="2.5" opacity="0.85" transform="rotate(150 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="60" stroke="#e8372a" strokeWidth="3.5" transform="rotate(180 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="55" stroke="#ffffff" strokeWidth="2.5" opacity="0.85" transform="rotate(210 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="55" stroke="#ffffff" strokeWidth="2.5" opacity="0.85" transform="rotate(240 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="60" stroke="#e8372a" strokeWidth="3.5" transform="rotate(270 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="55" stroke="#ffffff" strokeWidth="2.5" opacity="0.85" transform="rotate(300 340 340)"/>
+    <line x1="340" y1="30" x2="340" y2="55" stroke="#ffffff" strokeWidth="2.5" opacity="0.85" transform="rotate(330 340 340)"/>
+    <circle cx="340" cy="340" r="262" fill="#0d0d0d"/>
+    <circle cx="340" cy="340" r="262" fill="none" stroke="#2a2a2a" strokeWidth="1"/>
+    <circle cx="340" cy="340" r="246" fill="none" stroke="#e8372a" strokeWidth="0.8" opacity="0.2"/>
+    <circle cx="340" cy="80" r="5" fill="#e8372a"/>
+    <text x="340" y="136" textAnchor="middle" fontFamily="Helvetica Neue,Helvetica,Arial,sans-serif" fontSize="22" fontWeight="700" letterSpacing="8" fill="#ffffff">FUEL</text>
+    <text x="340" y="158" textAnchor="middle" fontFamily="Helvetica Neue,Helvetica,Arial,sans-serif" fontSize="11" fontWeight="400" letterSpacing="6" fill="#e8372a">PROTOCOL</text>
+    <line x1="282" y1="168" x2="398" y2="168" stroke="#2a2a2a" strokeWidth="1"/>
+    <path d="M340 432 C306 422 278 396 280 360 C282 336 296 316 304 304 C302 324 312 334 322 328 C314 304 318 276 334 254 C332 276 341 286 350 280 C346 256 354 230 366 216 C364 242 370 258 383 264 C400 244 403 218 396 200 C424 226 436 266 427 304 C423 324 410 338 410 338 C421 328 425 312 420 300 C433 324 434 354 419 380 C406 406 373 436 340 432Z" fill="#e8372a"/>
+    <path d="M340 412 C322 402 308 382 310 358 C312 340 322 326 328 316 C326 330 334 338 340 332 C337 316 340 292 350 276 C349 292 356 300 364 296 C367 278 371 258 366 242 C384 260 390 288 384 312 C380 328 369 339 369 339 C377 332 380 318 376 306 C385 326 386 350 375 372 C364 394 352 416 340 412Z" fill="#ff6b50" opacity="0.55"/>
+    <path d="M350 220 L320 320 L343 320 L312 420 L373 304 L348 304 L373 220Z" fill="#ffffff" opacity="0.95"/>
+    <text x="340" y="462" textAnchor="middle" fontFamily="Helvetica Neue,Helvetica,Arial,sans-serif" fontSize="8" letterSpacing="3" fill="#3a3a3a">NO. 001</text>
+    <circle cx="340" cy="498" r="24" fill="none" stroke="#1e1e1e" strokeWidth="6"/>
+    <circle cx="340" cy="498" r="21" fill="none" stroke="#e8372a" strokeWidth="0.8" opacity="0.35"/>
+    <line x1="340" y1="475" x2="340" y2="480" stroke="#e8372a" strokeWidth="1.2" opacity="0.5"/>
+    <line x1="340" y1="516" x2="340" y2="521" stroke="#e8372a" strokeWidth="1.2" opacity="0.5"/>
+    <line x1="317" y1="498" x2="322" y2="498" stroke="#e8372a" strokeWidth="1.2" opacity="0.5"/>
+    <line x1="358" y1="498" x2="363" y2="498" stroke="#e8372a" strokeWidth="1.2" opacity="0.5"/>
+    <g transform="rotate(-60 340 340)">
+      <polygon points="340,190 347,290 340,310 333,290" fill="#ffffff"/>
+      <polygon points="340,200 343,288 340,306 337,288" fill="#cccccc" opacity="0.4"/>
+      <polygon points="337,318 340,340 343,318 340,312" fill="#ffffff"/>
+    </g>
+    <g transform="rotate(60 340 340)">
+      <polygon points="340,152 346,272 340,300 334,272" fill="#ffffff"/>
+      <polygon points="340,162 343,270 340,296 337,270" fill="#cccccc" opacity="0.4"/>
+      <polygon points="337,308 340,332 343,308 340,303" fill="#ffffff"/>
+    </g>
+    <g transform="rotate(210 340 340)">
+      <line x1="340" y1="168" x2="340" y2="358" stroke="#e8372a" strokeWidth="1.2"/>
+      <line x1="340" y1="358" x2="340" y2="385" stroke="#e8372a" strokeWidth="1.2"/>
+      <circle cx="340" cy="390" r="6" fill="none" stroke="#e8372a" strokeWidth="1.2"/>
+    </g>
+    <circle cx="340" cy="340" r="10" fill="#222222" stroke="#444" strokeWidth="1"/>
+    <circle cx="340" cy="340" r="6" fill="#333333" stroke="#e8372a" strokeWidth="1"/>
+    <circle cx="340" cy="340" r="3" fill="#e8372a"/>
+  </svg>
+);
+
+// ─── NavBar ───────────────────────────────────────────────────────────────────
+function NavBar({active,onChange,dark}){
+  const t=dark?DARK:LIGHT;
+  return(
+    <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:t.surface,borderTop:`1px solid ${t.border}`,display:"flex",zIndex:100,boxShadow:`0 -2px 16px rgba(0,0,0,${dark?0.3:0.06})`}}>
+      {NAV.map(n=>(
+        <button key={n.id} onClick={()=>onChange(n.id)} style={{flex:1,background:"none",border:"none",padding:"9px 2px 11px",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+          <span style={{fontSize:17}}>{n.icon}</span>
+          <span style={{fontSize:9,fontWeight:700,letterSpacing:"0.06em",color:active===n.id?t.red:t.muted,textTransform:"uppercase"}}>{n.label}</span>
+          {active===n.id&&<div style={{width:14,height:2,borderRadius:1,background:t.red}}/>}
+        </button>
+      ))}
     </div>
   );
 }
 
 // ─── Safety check ─────────────────────────────────────────────────────────────
 function safetyLabel(calsPerDay){
-  if(calsPerDay<1000) return {text:"⚠️ Below safe minimum (1000 kcal). Consider a smaller deficit.",color:C.red||"#e8372a"};
-  if(calsPerDay<1200) return {text:"⚠️ Very aggressive — consult a health professional.",color:C.yellow||"#ff9500"};
+  if(calsPerDay<1000) return {text:"⚠️ Below safe minimum (1000 kcal). Consider a smaller deficit.",color:C.red};
+  if(calsPerDay<1200) return {text:"⚠️ Very aggressive — consult a health professional.",color:C.yellow};
   return null;
 }
 
@@ -443,7 +566,10 @@ export default function App(){
       <style>{STYLES}</style>
       <div style={{padding:"24px 20px"}}>
         <div style={{marginBottom:32,paddingTop:24,textAlign:"center"}}>
-          <div style={{display:"inline-block",background:`linear-gradient(135deg,${C.red}22,${C.violet}22)`,border:`1px solid ${C.red}44`,borderRadius:14,padding:"6px 16px",fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase",marginBottom:14}}>FUEL PROTOCOL</div>
+          <div style={{display:"flex",justifyContent:"center",marginBottom:16}}>
+            <Logo size={90}/>
+          </div>
+          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase",marginBottom:8}}>FUEL PROTOCOL</div>
           <div style={{fontSize:32,fontWeight:700,color:C.text,lineHeight:1.1,marginBottom:8}}>Set your<br/><span style={{color:C.red}}>targets</span></div>
           <div style={{fontSize:11,color:C.muted}}>Enter your details to calculate daily calorie and macro targets</div>
         </div>
@@ -498,7 +624,10 @@ export default function App(){
           {/* Header */}
           <div style={{padding:"18px 14px 0",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
             <div>
-              <div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase"}}>FUEL PROTOCOL</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:1}}>
+                <Logo size={22}/>
+                <div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase"}}>FUEL PROTOCOL</div>
+              </div>
               <div style={{fontSize:19,fontWeight:700,color:C.text}}>{new Date().toLocaleDateString("en-AU",{weekday:"long",month:"short",day:"numeric"})}</div>
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center"}}>
@@ -701,7 +830,7 @@ export default function App(){
       {/* ══ SEARCH ══════════════════════════════════════════════════════════════ */}
       {nav==="search"&&(
         <div className="fi" style={{padding:"18px 14px"}}>
-          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}><Logo size={18}/><div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase"}}>FUEL PROTOCOL</div></div>
           <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:10}}>Search & Build</div>
 
           {/* Mode tabs */}
@@ -874,7 +1003,7 @@ export default function App(){
       {/* ══ GOALS ═══════════════════════════════════════════════════════════════ */}
       {nav==="goals"&&(
         <div className="fi" style={{padding:"18px 14px"}}>
-          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}><Logo size={18}/><div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase"}}>FUEL PROTOCOL</div></div>
           <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:4}}>Deficit Goals</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:16}}>Set a loss rate or a target by a date — the app calculates your required daily deficit.</div>
 
@@ -995,7 +1124,7 @@ export default function App(){
           )}
 
           {/* How it works */}
-          <div style={{...crd,marginTop:14}}>
+          <div style={{...crd,marginTop:14,background:C.subtle}}>
             <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>How it works</div>
             <div style={{fontSize:10,color:C.muted,lineHeight:1.7}}>
               <div>• <span style={{color:C.text}}>1 kg of fat ≈ 7,700 kcal</span></div>
@@ -1013,7 +1142,7 @@ export default function App(){
       {/* ══ WEIGHT ══════════════════════════════════════════════════════════════ */}
       {nav==="weight"&&(
         <div className="fi" style={{padding:"18px 14px"}}>
-          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}><Logo size={18}/><div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase"}}>FUEL PROTOCOL</div></div>
           <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:14}}>Weight Log</div>
           <div style={{...crd,marginBottom:12}}>
             <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:9}}>Log Today's Weight</div>
@@ -1089,7 +1218,7 @@ export default function App(){
       {/* ══ HISTORY / DAY LOGS ═══════════════════════════════════════════════════ */}
       {nav==="history"&&(
         <div className="fi" style={{padding:"18px 14px"}}>
-          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}><Logo size={18}/><div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase"}}>FUEL PROTOCOL</div></div>
           <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:4}}>Day Logs</div>
           <div style={{fontSize:10,color:C.muted,marginBottom:14}}>Every day you log food is automatically saved here</div>
           {dayDetail?(
@@ -1314,7 +1443,7 @@ export default function App(){
       {/* ══ WEEKLY ══════════════════════════════════════════════════════════════ */}
       {nav==="weekly"&&(
         <div className="fi" style={{padding:"18px 14px"}}>
-          <div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase",marginBottom:3}}>FUEL PROTOCOL</div>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}><Logo size={18}/><div style={{fontSize:9,letterSpacing:"0.3em",color:C.red,fontWeight:700,textTransform:"uppercase"}}>FUEL PROTOCOL</div></div>
           <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:14}}>Weekly Summary</div>
           <button onClick={loadWeekly} style={{...btnFn(C.cyan),width:"auto",padding:"8px 18px",marginBottom:14}}>Refresh</button>
 
