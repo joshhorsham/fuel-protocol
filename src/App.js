@@ -511,14 +511,51 @@ export default function App(){
   const removeIngredient=(id)=>setRecipeIngredients(prev=>prev.filter(i=>i.id!==id));
   const recipeTotals=recipeIngredients.reduce((a,i)=>({cal:a.cal+i.cal,protein:a.protein+i.protein,carbs:a.carbs+i.carbs,fat:a.fat+i.fat}),{cal:0,protein:0,carbs:0,fat:0});
 
-  // ── Barcode scanner ──
+  // ── Barcode lookup helper — proxied through our API to avoid CORS ──
+  const lookupBarcode=async(code)=>{
+    setScanLoading(true);
+    setScanError("");
+    try{
+      // Try our proxy first, fall back to direct if needed
+      const r=await fetch(`/api/barcode?barcode=${encodeURIComponent(code)}`);
+      const d=await r.json();
+      if(d.status===1&&d.product){
+        const p=d.product;
+        const n=p.nutriments||{};
+        // kJ fallback: if no kcal data, convert from kJ
+        const kcalServing=n["energy-kcal_serving"]||n["energy-kcal_100g"];
+        const kjServing=n["energy-kj_serving"]||n["energy-kj_100g"]||n["energy_serving"]||n["energy_100g"];
+        const cal=kcalServing ? Math.round(kcalServing) : kjServing ? Math.round(kjServing/4.184) : 0;
+        setScanResult({
+          name:p.product_name||p.product_name_en||p.abbreviated_product_name||"Unknown Product",
+          brand:p.brands||"",
+          serving:p.serving_size||"100g",
+          cal,
+          protein:Math.round(n.proteins_serving||n.proteins_100g||0),
+          carbs:Math.round(n.carbohydrates_serving||n.carbohydrates_100g||0),
+          fat:Math.round(n.fat_serving||n.fat_100g||0),
+        });
+        return true;
+      } else {
+        setScanError("Product not found in database. Try searching by name in Food Search.");
+        return false;
+      }
+    }catch(e){
+      setScanError("Lookup failed — check your connection and try again.");
+      return false;
+    }finally{
+      setScanLoading(false);
+    }
+  };
+
+  // ── Barcode scanner camera ──
   useEffect(()=>{
     if(!scannerActive) return;
     let codeReader=null;
     let stopped=false;
     const run=async()=>{
       try{
-        // Dynamically load ZXing
+        // Load ZXing dynamically
         if(!window.ZXing){
           await new Promise((res,rej)=>{
             const s=document.createElement("script");
@@ -527,73 +564,48 @@ export default function App(){
             document.head.appendChild(s);
           });
         }
-        const hints=new Map();
-        const formats=[
-          window.ZXing.BarcodeFormat.EAN_13,
-          window.ZXing.BarcodeFormat.EAN_8,
-          window.ZXing.BarcodeFormat.UPC_A,
-          window.ZXing.BarcodeFormat.UPC_E,
-          window.ZXing.BarcodeFormat.CODE_128,
-          window.ZXing.BarcodeFormat.CODE_39,
-          window.ZXing.BarcodeFormat.QR_CODE,
-        ];
-        hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,formats);
-        codeReader=new window.ZXing.BrowserMultiFormatReader(hints);
-        const devices=await window.ZXing.BrowserCodeReader.listVideoInputDevices();
-        const deviceId=devices.find(d=>d.label.toLowerCase().includes("back"))?.deviceId||devices[0]?.deviceId;
+        // Small delay to ensure video element is in DOM
+        await new Promise(r=>setTimeout(r,100));
         const video=document.getElementById("fp-scanner-video");
         if(!video||stopped) return;
-        await codeReader.decodeFromVideoDevice(deviceId,video,async(result,err)=>{
-          if(stopped) return;
-          if(result){
+        codeReader=new window.ZXing.BrowserMultiFormatReader();
+        await codeReader.decodeFromConstraints(
+          {video:{facingMode:{ideal:"environment"}}},
+          video,
+          async(result,err)=>{
+            if(stopped||!result) return;
             const code=result.getText();
             stopped=true;
             codeReader.reset();
-            setScanLoading(true);
-            try{
-              const r=await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
-              const d=await r.json();
-              if(d.status===1&&d.product){
-                const p=d.product;
-                const n=p.nutriments||{};
-                setScanResult({
-                  name:p.product_name||p.product_name_en||"Unknown Product",
-                  brand:p.brands||"",
-                  serving:p.serving_size||"100g",
-                  cal:Math.round(n["energy-kcal_serving"]||n["energy-kcal_100g"]||0),
-                  protein:Math.round(n.proteins_serving||n.proteins_100g||0),
-                  carbs:Math.round(n.carbohydrates_serving||n.carbohydrates_100g||0),
-                  fat:Math.round(n.fat_serving||n.fat_100g||0),
-                });
-                setScannerActive(false);
-              } else {
-                setScanError("Product not found in database. Try manual entry below.");
-                stopped=false;
-              }
-            }catch{
-              setScanError("Lookup failed. Check your connection.");
-              stopped=false;
-            }
-            setScanLoading(false);
+            const found=await lookupBarcode(code);
+            if(found) setScannerActive(false);
+            else stopped=false; // allow retry
           }
-        });
+        );
       }catch(e){
         console.error("Scanner error:",e);
         if(e.name==="NotAllowedError"||e.name==="PermissionDeniedError"){
-          setScanError("Camera permission denied. Please allow camera access in your browser settings then try again.");
+          setScanError("Camera permission denied. Allow camera access in browser settings and try again.");
         } else if(e.name==="NotFoundError"){
-          setScanError("No camera found on this device.");
-        } else if(e.name==="NotSupportedError"){
-          setScanError("Camera not supported in this browser. Try Chrome or Safari.");
+          setScanError("No camera found. Use manual barcode entry below.");
+        } else if(e.name==="NotSupportedError"||e.name==="InsecureOperationError"){
+          setScanError("Camera requires HTTPS. You're already on a secure URL — try refreshing.");
         } else {
-          setScanError(`Scanner error: ${e.message||"Unknown error"}. Use manual entry below.`);
+          setScanError(`Camera error: ${e.message||"Unknown"}. Use manual entry below.`);
         }
         setScannerActive(false);
       }
     };
     run();
-    return()=>{stopped=true;if(codeReader)codeReader.reset();};
+    return()=>{stopped=true;if(codeReader){try{codeReader.reset();}catch{}}};
   },[scannerActive]);
+
+  // ── Stop camera when leaving scanner tab ──
+  useEffect(()=>{
+    if(nav!=="search"||searchMode!=="scanner"){
+      setScannerActive(false);
+    }
+  },[nav,searchMode]);
 
   // ── Search ──
   const doSearch=async()=>{
@@ -1171,7 +1183,7 @@ export default function App(){
                   <div style={{fontSize:48,marginBottom:12}}>📷</div>
                   <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:6}}>Scan a Barcode</div>
                   <div style={{fontSize:11,color:C.muted,marginBottom:20}}>Works with any supermarket product barcode — Coles, Woolworths, Aldi and more</div>
-                  <button onClick={()=>setScannerActive(true)} style={btnFn(C.green)}>Start Scanner</button>
+                  <button onClick={()=>{setScannerActive(true);setScanError("");setScanResult(null);}} style={btnFn(C.green)}>Start Scanner</button>
                 </div>
               )}
 
@@ -1233,28 +1245,9 @@ export default function App(){
                   <button onClick={async()=>{
                     const code=manualBarcode.trim();
                     if(!code)return;
-                    setScanLoading(true);setScanError("");setScanResult(null);
-                    try{
-                      const r=await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
-                      const d=await r.json();
-                      if(d.status===1&&d.product){
-                        const p=d.product;
-                        const n=p.nutriments||{};
-                        setScanResult({
-                          name:p.product_name||p.product_name_en||"Unknown Product",
-                          brand:p.brands||"",
-                          serving:p.serving_size||"100g",
-                          cal:Math.round(n["energy-kcal_serving"]||n["energy-kcal_100g"]||0),
-                          protein:Math.round(n.proteins_serving||n.proteins_100g||0),
-                          carbs:Math.round(n.carbohydrates_serving||n.carbohydrates_100g||0),
-                          fat:Math.round(n.fat_serving||n.fat_100g||0),
-                        });
-                        setManualBarcode("");
-                      } else {
-                        setScanError("Product not found. Try searching by name instead.");
-                      }
-                    }catch{setScanError("Lookup failed. Check your connection.");}
-                    setScanLoading(false);
+                    setScanResult(null);
+                    const found=await lookupBarcode(code);
+                    if(found) setManualBarcode("");
                   }} style={{...btnFn(C.green),width:"auto",padding:"10px 14px",flexShrink:0}}>
                     {scanLoading?<Spin col="#fff"/>:"Look up"}
                   </button>
