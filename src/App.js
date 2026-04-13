@@ -352,6 +352,7 @@ export default function App(){
   const [scanResult,setScanResult]=useState(null);
   const [scanLoading,setScanLoading]=useState(false);
   const [scanError,setScanError]=useState("");
+  const [manualBarcode,setManualBarcode]=useState("");
   const [searchR,setSearchR]=useState([]);
   const [searchLoading,setSearchLoading]=useState(false);
   const [suggestions,setSuggestions]=useState([]);
@@ -521,7 +522,7 @@ export default function App(){
         if(!window.ZXing){
           await new Promise((res,rej)=>{
             const s=document.createElement("script");
-            s.src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js";
+            s.src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js";
             s.onload=res; s.onerror=rej;
             document.head.appendChild(s);
           });
@@ -577,7 +578,16 @@ export default function App(){
           }
         });
       }catch(e){
-        setScanError("Camera access denied or unavailable. Use manual entry below.");
+        console.error("Scanner error:",e);
+        if(e.name==="NotAllowedError"||e.name==="PermissionDeniedError"){
+          setScanError("Camera permission denied. Please allow camera access in your browser settings then try again.");
+        } else if(e.name==="NotFoundError"){
+          setScanError("No camera found on this device.");
+        } else if(e.name==="NotSupportedError"){
+          setScanError("Camera not supported in this browser. Try Chrome or Safari.");
+        } else {
+          setScanError(`Scanner error: ${e.message||"Unknown error"}. Use manual entry below.`);
+        }
         setScannerActive(false);
       }
     };
@@ -1219,10 +1229,9 @@ export default function App(){
               <div style={{...crd}}>
                 <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Enter Barcode Manually</div>
                 <div style={{display:"flex",gap:8}}>
-                  <input type="number" placeholder="e.g. 9300652027258" value={scanError==="manual"?"":""} id="fp-manual-barcode" style={{...iStyle,flex:1}}/>
+                  <input type="number" placeholder="e.g. 9300652027258" value={manualBarcode} onChange={e=>setManualBarcode(e.target.value)} style={{...iStyle,flex:1}}/>
                   <button onClick={async()=>{
-                    const el=document.getElementById("fp-manual-barcode");
-                    const code=el?.value?.trim();
+                    const code=manualBarcode.trim();
                     if(!code)return;
                     setScanLoading(true);setScanError("");setScanResult(null);
                     try{
@@ -1240,7 +1249,7 @@ export default function App(){
                           carbs:Math.round(n.carbohydrates_serving||n.carbohydrates_100g||0),
                           fat:Math.round(n.fat_serving||n.fat_100g||0),
                         });
-                        if(el) el.value="";
+                        setManualBarcode("");
                       } else {
                         setScanError("Product not found. Try searching by name instead.");
                       }
