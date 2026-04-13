@@ -548,48 +548,81 @@ export default function App(){
     }
   };
 
-  // ── Barcode scanner camera ──
+  // ── Barcode scanner camera — using QuaggaJS for better real-world scanning ──
   useEffect(()=>{
     if(!scannerActive) return;
-    let codeReader=null;
-    let stopped=false;
+    let quaggaStarted=false;
+    let detectionCount={};
+    const CONFIRM_THRESHOLD=3; // require same barcode 3 times to confirm
     const run=async()=>{
       try{
-        // Load ZXing dynamically
-        if(!window.ZXing){
+        // Load QuaggaJS
+        if(!window.Quagga){
           await new Promise((res,rej)=>{
             const s=document.createElement("script");
-            s.src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js";
+            s.src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js";
             s.onload=res; s.onerror=rej;
             document.head.appendChild(s);
           });
         }
-        // Small delay to ensure video element is in DOM
-        await new Promise(r=>setTimeout(r,100));
-        const video=document.getElementById("fp-scanner-video");
-        if(!video||stopped) return;
-        codeReader=new window.ZXing.BrowserMultiFormatReader();
-        await codeReader.decodeFromConstraints(
-          {video:{facingMode:{ideal:"environment"}}},
-          video,
-          async(result,err)=>{
-            if(stopped||!result) return;
-            const code=result.getText();
-            stopped=true;
-            codeReader.reset();
-            const found=await lookupBarcode(code);
-            if(found) setScannerActive(false);
-            else stopped=false; // allow retry
+        await new Promise(r=>setTimeout(r,150));
+        const container=document.getElementById("fp-scanner-container");
+        if(!container) return;
+        await new Promise((res,rej)=>{
+          window.Quagga.init({
+            inputStream:{
+              name:"Live",
+              type:"LiveStream",
+              target:container,
+              constraints:{
+                facingMode:"environment",
+                width:{min:640,ideal:1280},
+                height:{min:480,ideal:720},
+              },
+            },
+            locator:{patchSize:"medium",halfSample:true},
+            numOfWorkers:2,
+            frequency:10,
+            decoder:{
+              readers:["ean_reader","ean_8_reader","upc_reader","upc_e_reader","code_128_reader","code_39_reader"],
+              debug:{drawBoundingBox:false,showFrequency:false,drawScanline:false,showPattern:false},
+            },
+            locate:true,
+          },(err)=>{
+            if(err){rej(err);return;}
+            res();
+          });
+        });
+        quaggaStarted=true;
+        window.Quagga.start();
+        window.Quagga.onDetected(async(data)=>{
+          const code=data.codeResult.code;
+          if(!code) return;
+          // Require multiple detections of same code for accuracy
+          detectionCount[code]=(detectionCount[code]||0)+1;
+          if(detectionCount[code]<CONFIRM_THRESHOLD) return;
+          // Stop scanning
+          window.Quagga.offDetected();
+          window.Quagga.stop();
+          quaggaStarted=false;
+          // Look up barcode
+          const found=await lookupBarcode(code);
+          if(found){
+            setScannerActive(false);
+          } else {
+            // restart scanning
+            detectionCount={};
+            quaggaStarted=true;
+            window.Quagga.start();
+            window.Quagga.onDetected(arguments.callee);
           }
-        );
+        });
       }catch(e){
         console.error("Scanner error:",e);
-        if(e.name==="NotAllowedError"||e.name==="PermissionDeniedError"){
+        if(e.name==="NotAllowedError"||e.message?.includes("Permission")){
           setScanError("Camera permission denied. Allow camera access in browser settings and try again.");
         } else if(e.name==="NotFoundError"){
           setScanError("No camera found. Use manual barcode entry below.");
-        } else if(e.name==="NotSupportedError"||e.name==="InsecureOperationError"){
-          setScanError("Camera requires HTTPS. You're already on a secure URL — try refreshing.");
         } else {
           setScanError(`Camera error: ${e.message||"Unknown"}. Use manual entry below.`);
         }
@@ -597,7 +630,11 @@ export default function App(){
       }
     };
     run();
-    return()=>{stopped=true;if(codeReader){try{codeReader.reset();}catch{}}};
+    return()=>{
+      if(quaggaStarted){
+        try{window.Quagga.offDetected();window.Quagga.stop();}catch{}
+      }
+    };
   },[scannerActive]);
 
   // ── Stop camera when leaving scanner tab ──
@@ -1192,17 +1229,21 @@ export default function App(){
                 <div style={{...crd,marginBottom:10,border:`1px solid ${C.green}44`}}>
                   <div style={{fontSize:10,color:C.green,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Scanner Active</div>
                   <div style={{position:"relative",borderRadius:12,overflow:"hidden",background:"#000",marginBottom:10}}>
-                    <video id="fp-scanner-video" style={{width:"100%",display:"block",minHeight:220}} autoPlay playsInline muted/>
+                    <div id="fp-scanner-container" style={{width:"100%",minHeight:240,position:"relative"}}>
+                      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#444",fontSize:12}}>Starting camera…</div>
+                    </div>
                     {/* Targeting overlay */}
                     <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
-                      <div style={{width:220,height:120,border:`2px solid ${C.green}`,borderRadius:8,position:"relative"}}>
-                        <div style={{position:"absolute",top:-1,left:-1,width:20,height:20,borderTop:`3px solid ${C.green}`,borderLeft:`3px solid ${C.green}`,borderRadius:"4px 0 0 0"}}/>
-                        <div style={{position:"absolute",top:-1,right:-1,width:20,height:20,borderTop:`3px solid ${C.green}`,borderRight:`3px solid ${C.green}`,borderRadius:"0 4px 0 0"}}/>
-                        <div style={{position:"absolute",bottom:-1,left:-1,width:20,height:20,borderBottom:`3px solid ${C.green}`,borderLeft:`3px solid ${C.green}`,borderRadius:"0 0 0 4px"}}/>
-                        <div style={{position:"absolute",bottom:-1,right:-1,width:20,height:20,borderBottom:`3px solid ${C.green}`,borderRight:`3px solid ${C.green}`,borderRadius:"0 0 4px 0"}}/>
-                        <div style={{position:"absolute",top:"50%",left:0,right:0,height:1,background:`${C.green}88`,transform:"translateY(-50%)"}}/>
+                      <div style={{width:240,height:130,border:`2px solid ${C.green}`,borderRadius:8,position:"relative"}}>
+                        <div style={{position:"absolute",top:-1,left:-1,width:22,height:22,borderTop:`3px solid ${C.green}`,borderLeft:`3px solid ${C.green}`,borderRadius:"4px 0 0 0"}}/>
+                        <div style={{position:"absolute",top:-1,right:-1,width:22,height:22,borderTop:`3px solid ${C.green}`,borderRight:`3px solid ${C.green}`,borderRadius:"0 4px 0 0"}}/>
+                        <div style={{position:"absolute",bottom:-1,left:-1,width:22,height:22,borderBottom:`3px solid ${C.green}`,borderLeft:`3px solid ${C.green}`,borderRadius:"0 0 0 4px"}}/>
+                        <div style={{position:"absolute",bottom:-1,right:-1,width:22,height:22,borderBottom:`3px solid ${C.green}`,borderRight:`3px solid ${C.green}`,borderRadius:"0 0 4px 0"}}/>
+                        <div style={{position:"absolute",top:"50%",left:0,right:0,height:1,background:`${C.green}66`,transform:"translateY(-50%)"}}/>
+                        <div style={{position:"absolute",top:0,bottom:0,left:"50%",width:1,background:`${C.green}22`,transform:"translateX(-50%)"}}/>
                       </div>
                     </div>
+                    <div style={{position:"absolute",bottom:8,left:0,right:0,textAlign:"center",fontSize:10,color:"#ffffff88",pointerEvents:"none"}}>Hold barcode steady in the box</div>
                   </div>
                   {scanLoading&&<div style={{textAlign:"center",padding:"8px 0",color:C.green,fontSize:12}}><Spin col={C.green}/> Looking up barcode…</div>}
                   {scanError&&<div style={{textAlign:"center",padding:"8px 0",color:C.red,fontSize:12}}>{scanError}</div>}
