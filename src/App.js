@@ -576,8 +576,9 @@ export default function App(){
               target:container,
               constraints:{
                 facingMode:"environment",
-                width:{min:640,ideal:1280},
-                height:{min:480,ideal:720},
+                width:{min:320,ideal:640},
+                height:{min:240,ideal:480},
+                aspectRatio:{ideal:1.333},
               },
             },
             locator:{patchSize:"medium",halfSample:true},
@@ -1228,22 +1229,32 @@ export default function App(){
               {scannerActive&&!scanResult&&(
                 <div style={{...crd,marginBottom:10,border:`1px solid ${C.green}44`}}>
                   <div style={{fontSize:10,color:C.green,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Scanner Active</div>
-                  <div style={{position:"relative",borderRadius:12,overflow:"hidden",background:"#000",marginBottom:10}}>
-                    <div id="fp-scanner-container" style={{width:"100%",minHeight:240,position:"relative"}}>
-                      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#444",fontSize:12}}>Starting camera…</div>
+                  <div style={{position:"relative",borderRadius:12,overflow:"hidden",background:"#000",marginBottom:10,height:260}}>
+                    <style>{`
+                      #fp-scanner-container video,
+                      #fp-scanner-container canvas {
+                        position:absolute!important;
+                        top:0!important;left:0!important;
+                        width:100%!important;
+                        height:260px!important;
+                        object-fit:cover!important;
+                      }
+                      #fp-scanner-container canvas.drawingBuffer { display:none!important; }
+                    `}</style>
+                    <div id="fp-scanner-container" style={{width:"100%",height:260,position:"relative",overflow:"hidden"}}>
+                      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#444",fontSize:12,zIndex:0}}>Starting camera…</div>
                     </div>
-                    {/* Targeting overlay */}
-                    <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
-                      <div style={{width:240,height:130,border:`2px solid ${C.green}`,borderRadius:8,position:"relative"}}>
-                        <div style={{position:"absolute",top:-1,left:-1,width:22,height:22,borderTop:`3px solid ${C.green}`,borderLeft:`3px solid ${C.green}`,borderRadius:"4px 0 0 0"}}/>
-                        <div style={{position:"absolute",top:-1,right:-1,width:22,height:22,borderTop:`3px solid ${C.green}`,borderRight:`3px solid ${C.green}`,borderRadius:"0 4px 0 0"}}/>
-                        <div style={{position:"absolute",bottom:-1,left:-1,width:22,height:22,borderBottom:`3px solid ${C.green}`,borderLeft:`3px solid ${C.green}`,borderRadius:"0 0 0 4px"}}/>
-                        <div style={{position:"absolute",bottom:-1,right:-1,width:22,height:22,borderBottom:`3px solid ${C.green}`,borderRight:`3px solid ${C.green}`,borderRadius:"0 0 4px 0"}}/>
-                        <div style={{position:"absolute",top:"50%",left:0,right:0,height:1,background:`${C.green}66`,transform:"translateY(-50%)"}}/>
-                        <div style={{position:"absolute",top:0,bottom:0,left:"50%",width:1,background:`${C.green}22`,transform:"translateX(-50%)"}}/>
+                    {/* Targeting overlay — sits above video */}
+                    <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none",zIndex:10}}>
+                      <div style={{width:230,height:110,border:`2px solid ${C.green}`,borderRadius:8,position:"relative"}}>
+                        <div style={{position:"absolute",top:-2,left:-2,width:20,height:20,borderTop:`3px solid ${C.green}`,borderLeft:`3px solid ${C.green}`,borderRadius:"4px 0 0 0"}}/>
+                        <div style={{position:"absolute",top:-2,right:-2,width:20,height:20,borderTop:`3px solid ${C.green}`,borderRight:`3px solid ${C.green}`,borderRadius:"0 4px 0 0"}}/>
+                        <div style={{position:"absolute",bottom:-2,left:-2,width:20,height:20,borderBottom:`3px solid ${C.green}`,borderLeft:`3px solid ${C.green}`,borderRadius:"0 0 0 4px"}}/>
+                        <div style={{position:"absolute",bottom:-2,right:-2,width:20,height:20,borderBottom:`3px solid ${C.green}`,borderRight:`3px solid ${C.green}`,borderRadius:"0 0 4px 0"}}/>
+                        <div style={{position:"absolute",top:"50%",left:0,right:0,height:1,background:`${C.green}55`,transform:"translateY(-50%)"}}/>
                       </div>
                     </div>
-                    <div style={{position:"absolute",bottom:8,left:0,right:0,textAlign:"center",fontSize:10,color:"#ffffff88",pointerEvents:"none"}}>Hold barcode steady in the box</div>
+                    <div style={{position:"absolute",bottom:8,left:0,right:0,textAlign:"center",fontSize:10,color:"#ffffffaa",pointerEvents:"none",zIndex:10}}>Hold barcode steady in the box</div>
                   </div>
                   {scanLoading&&<div style={{textAlign:"center",padding:"8px 0",color:C.green,fontSize:12}}><Spin col={C.green}/> Looking up barcode…</div>}
                   {scanError&&<div style={{textAlign:"center",padding:"8px 0",color:C.red,fontSize:12}}>{scanError}</div>}
