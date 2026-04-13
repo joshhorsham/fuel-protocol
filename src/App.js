@@ -346,6 +346,12 @@ export default function App(){
   const [recipeSearchR,setRecipeSearchR]=useState([]);
   const [recipeSearchLoading,setRecipeSearchLoading]=useState(false);
   const [recipeManual,setRecipeManual]=useState({name:"",cal:"",protein:"",carbs:"",fat:""});
+  const [kjInput,setKjInput]=useState("");
+  const [calInput,setCalInput]=useState("");
+  const [scannerActive,setScannerActive]=useState(false);
+  const [scanResult,setScanResult]=useState(null);
+  const [scanLoading,setScanLoading]=useState(false);
+  const [scanError,setScanError]=useState("");
   const [searchR,setSearchR]=useState([]);
   const [searchLoading,setSearchLoading]=useState(false);
   const [suggestions,setSuggestions]=useState([]);
@@ -503,6 +509,81 @@ export default function App(){
   };
   const removeIngredient=(id)=>setRecipeIngredients(prev=>prev.filter(i=>i.id!==id));
   const recipeTotals=recipeIngredients.reduce((a,i)=>({cal:a.cal+i.cal,protein:a.protein+i.protein,carbs:a.carbs+i.carbs,fat:a.fat+i.fat}),{cal:0,protein:0,carbs:0,fat:0});
+
+  // ── Barcode scanner ──
+  useEffect(()=>{
+    if(!scannerActive) return;
+    let codeReader=null;
+    let stopped=false;
+    const run=async()=>{
+      try{
+        // Dynamically load ZXing
+        if(!window.ZXing){
+          await new Promise((res,rej)=>{
+            const s=document.createElement("script");
+            s.src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js";
+            s.onload=res; s.onerror=rej;
+            document.head.appendChild(s);
+          });
+        }
+        const hints=new Map();
+        const formats=[
+          window.ZXing.BarcodeFormat.EAN_13,
+          window.ZXing.BarcodeFormat.EAN_8,
+          window.ZXing.BarcodeFormat.UPC_A,
+          window.ZXing.BarcodeFormat.UPC_E,
+          window.ZXing.BarcodeFormat.CODE_128,
+          window.ZXing.BarcodeFormat.CODE_39,
+          window.ZXing.BarcodeFormat.QR_CODE,
+        ];
+        hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,formats);
+        codeReader=new window.ZXing.BrowserMultiFormatReader(hints);
+        const devices=await window.ZXing.BrowserCodeReader.listVideoInputDevices();
+        const deviceId=devices.find(d=>d.label.toLowerCase().includes("back"))?.deviceId||devices[0]?.deviceId;
+        const video=document.getElementById("fp-scanner-video");
+        if(!video||stopped) return;
+        await codeReader.decodeFromVideoDevice(deviceId,video,async(result,err)=>{
+          if(stopped) return;
+          if(result){
+            const code=result.getText();
+            stopped=true;
+            codeReader.reset();
+            setScanLoading(true);
+            try{
+              const r=await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
+              const d=await r.json();
+              if(d.status===1&&d.product){
+                const p=d.product;
+                const n=p.nutriments||{};
+                setScanResult({
+                  name:p.product_name||p.product_name_en||"Unknown Product",
+                  brand:p.brands||"",
+                  serving:p.serving_size||"100g",
+                  cal:Math.round(n["energy-kcal_serving"]||n["energy-kcal_100g"]||0),
+                  protein:Math.round(n.proteins_serving||n.proteins_100g||0),
+                  carbs:Math.round(n.carbohydrates_serving||n.carbohydrates_100g||0),
+                  fat:Math.round(n.fat_serving||n.fat_100g||0),
+                });
+                setScannerActive(false);
+              } else {
+                setScanError("Product not found in database. Try manual entry below.");
+                stopped=false;
+              }
+            }catch{
+              setScanError("Lookup failed. Check your connection.");
+              stopped=false;
+            }
+            setScanLoading(false);
+          }
+        });
+      }catch(e){
+        setScanError("Camera access denied or unavailable. Use manual entry below.");
+        setScannerActive(false);
+      }
+    };
+    run();
+    return()=>{stopped=true;if(codeReader)codeReader.reset();};
+  },[scannerActive]);
 
   // ── Search ──
   const doSearch=async()=>{
@@ -834,12 +915,18 @@ export default function App(){
           <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:10}}>Search & Build</div>
 
           {/* Mode tabs */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
-            <button onClick={()=>setSearchMode("search")} style={{...chipFn(searchMode==="search",C.red),padding:"10px 8px",fontSize:11}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:14}}>
+            <button onClick={()=>{setSearchMode("search");setScannerActive(false);}} style={{...chipFn(searchMode==="search",C.red),padding:"10px 6px",fontSize:10}}>
               🔍 Food Search
             </button>
-            <button onClick={()=>setSearchMode("recipe")} style={{...chipFn(searchMode==="recipe",C.violet),padding:"10px 8px",fontSize:11}}>
+            <button onClick={()=>{setSearchMode("recipe");setScannerActive(false);}} style={{...chipFn(searchMode==="recipe",C.violet),padding:"10px 6px",fontSize:10}}>
               🍳 Recipe Builder
+            </button>
+            <button onClick={()=>{setSearchMode("converter");setScannerActive(false);}} style={{...chipFn(searchMode==="converter",C.cyan),padding:"10px 6px",fontSize:10}}>
+              ⚡ kJ Converter
+            </button>
+            <button onClick={()=>{setSearchMode("scanner");setScanResult(null);setScanError("");}} style={{...chipFn(searchMode==="scanner",C.green),padding:"10px 6px",fontSize:10}}>
+              📷 Scan Barcode
             </button>
           </div>
 
@@ -995,6 +1082,177 @@ export default function App(){
                 </div>
               )}
               {recipeIngredients.length===0&&<div style={{textAlign:"center",color:C.border,fontSize:12,padding:"20px 0"}}>Search or manually enter ingredients above to build your recipe</div>}
+            </>
+          )}
+
+          {/* ── KJ CONVERTER MODE ── */}
+          {searchMode==="converter"&&(
+            <>
+              <div style={{fontSize:10,color:C.muted,marginBottom:14}}>Australian food labels use kilojoules (kJ). Convert instantly either way.</div>
+
+              {/* kJ to Cal */}
+              <div style={{...crd,marginBottom:10,border:`1px solid ${C.cyan}33`}}>
+                <div style={{fontSize:10,color:C.cyan,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>kJ → Calories</div>
+                <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+                  <input type="number" placeholder="Enter kJ" value={kjInput}
+                    onChange={e=>{
+                      setKjInput(e.target.value);
+                      setCalInput(e.target.value ? (parseFloat(e.target.value)/4.184).toFixed(1) : "");
+                    }}
+                    style={{...iStyle,flex:1}}/>
+                  <span style={{fontSize:12,color:C.muted,flexShrink:0}}>kJ</span>
+                </div>
+                {kjInput&&(
+                  <div style={{background:C.subtle,borderRadius:10,padding:"12px 14px",border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>= Calories (kcal)</div>
+                    <div style={{fontSize:32,fontWeight:700,color:C.cyan}}>{(parseFloat(kjInput)/4.184).toFixed(1)}</div>
+                    <div style={{fontSize:10,color:C.muted,marginTop:2}}>{parseFloat(kjInput).toLocaleString()} kJ ÷ 4.184</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Cal to kJ */}
+              <div style={{...crd,marginBottom:10,border:`1px solid ${C.red}33`}}>
+                <div style={{fontSize:10,color:C.red,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Calories → kJ</div>
+                <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+                  <input type="number" placeholder="Enter calories" value={calInput}
+                    onChange={e=>{
+                      setCalInput(e.target.value);
+                      setKjInput(e.target.value ? (parseFloat(e.target.value)*4.184).toFixed(1) : "");
+                    }}
+                    style={{...iStyle,flex:1}}/>
+                  <span style={{fontSize:12,color:C.muted,flexShrink:0}}>cal</span>
+                </div>
+                {calInput&&(
+                  <div style={{background:C.subtle,borderRadius:10,padding:"12px 14px",border:`1px solid ${C.border}`}}>
+                    <div style={{fontSize:9,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:4}}>= Kilojoules (kJ)</div>
+                    <div style={{fontSize:32,fontWeight:700,color:C.red}}>{(parseFloat(calInput)*4.184).toFixed(1)}</div>
+                    <div style={{fontSize:10,color:C.muted,marginTop:2}}>{parseFloat(calInput).toLocaleString()} cal × 4.184</div>
+                  </div>
+                )}
+              </div>
+
+              {/* Quick reference */}
+              <div style={{...crd}}>
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Quick Reference</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+                  {[[100,"418"],[200,"837"],[500,"2,092"],[1000,"4,184"],[1500,"6,276"],[2000,"8,368"],[2500,"10,460"],[8700,"2,079 cal"]].map(([kj,cal],i)=>(
+                    <div key={i} onClick={()=>{
+                      if(i<7){setKjInput(String(kj));setCalInput((kj/4.184).toFixed(1));}
+                    }} style={{background:C.subtle,borderRadius:8,padding:"8px 10px",border:`1px solid ${C.border}`,cursor:i<7?"pointer":"default",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:11,color:C.muted}}>{typeof kj==="number"?kj.toLocaleString():kj} kJ</span>
+                      <span style={{fontSize:11,fontWeight:700,color:C.cyan}}>{cal}{i<7?" cal":""}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:9,color:C.muted,marginTop:10,textAlign:"center"}}>Tap any row to auto-fill · 1 cal = 4.184 kJ</div>
+              </div>
+            </>
+          )}
+
+          {/* ── BARCODE SCANNER MODE ── */}
+          {searchMode==="scanner"&&(
+            <>
+              <div style={{fontSize:10,color:C.muted,marginBottom:14}}>Point your camera at a barcode to get nutrition info from the Open Food Facts database.</div>
+
+              {/* Scanner card */}
+              {!scannerActive&&!scanResult&&(
+                <div style={{...crd,textAlign:"center",padding:"28px 20px",marginBottom:10}}>
+                  <div style={{fontSize:48,marginBottom:12}}>📷</div>
+                  <div style={{fontSize:14,fontWeight:700,color:C.text,marginBottom:6}}>Scan a Barcode</div>
+                  <div style={{fontSize:11,color:C.muted,marginBottom:20}}>Works with any supermarket product barcode — Coles, Woolworths, Aldi and more</div>
+                  <button onClick={()=>setScannerActive(true)} style={btnFn(C.green)}>Start Scanner</button>
+                </div>
+              )}
+
+              {/* Active scanner */}
+              {scannerActive&&!scanResult&&(
+                <div style={{...crd,marginBottom:10,border:`1px solid ${C.green}44`}}>
+                  <div style={{fontSize:10,color:C.green,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>Scanner Active</div>
+                  <div style={{position:"relative",borderRadius:12,overflow:"hidden",background:"#000",marginBottom:10}}>
+                    <video id="fp-scanner-video" style={{width:"100%",display:"block",minHeight:220}} autoPlay playsInline muted/>
+                    {/* Targeting overlay */}
+                    <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",pointerEvents:"none"}}>
+                      <div style={{width:220,height:120,border:`2px solid ${C.green}`,borderRadius:8,position:"relative"}}>
+                        <div style={{position:"absolute",top:-1,left:-1,width:20,height:20,borderTop:`3px solid ${C.green}`,borderLeft:`3px solid ${C.green}`,borderRadius:"4px 0 0 0"}}/>
+                        <div style={{position:"absolute",top:-1,right:-1,width:20,height:20,borderTop:`3px solid ${C.green}`,borderRight:`3px solid ${C.green}`,borderRadius:"0 4px 0 0"}}/>
+                        <div style={{position:"absolute",bottom:-1,left:-1,width:20,height:20,borderBottom:`3px solid ${C.green}`,borderLeft:`3px solid ${C.green}`,borderRadius:"0 0 0 4px"}}/>
+                        <div style={{position:"absolute",bottom:-1,right:-1,width:20,height:20,borderBottom:`3px solid ${C.green}`,borderRight:`3px solid ${C.green}`,borderRadius:"0 0 4px 0"}}/>
+                        <div style={{position:"absolute",top:"50%",left:0,right:0,height:1,background:`${C.green}88`,transform:"translateY(-50%)"}}/>
+                      </div>
+                    </div>
+                  </div>
+                  {scanLoading&&<div style={{textAlign:"center",padding:"8px 0",color:C.green,fontSize:12}}><Spin col={C.green}/> Looking up barcode…</div>}
+                  {scanError&&<div style={{textAlign:"center",padding:"8px 0",color:C.red,fontSize:12}}>{scanError}</div>}
+                  <button onClick={()=>{setScannerActive(false);setScanError("");}} style={{...btnFn(C.subtle),color:C.muted,boxShadow:"none",border:`1px solid ${C.border}`}}>Cancel</button>
+                  <div id="fp-zxing-script" style={{display:"none"}}/>
+                </div>
+              )}
+
+              {/* Scan result */}
+              {scanResult&&(
+                <div style={{...crd,marginBottom:10,border:`1px solid ${C.green}44`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                    <div style={{fontSize:10,color:C.green,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase"}}>✅ Product Found</div>
+                    <button onClick={()=>{setScanResult(null);setScannerActive(false);}} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:13}}>✕</button>
+                  </div>
+                  <div style={{fontSize:16,fontWeight:700,color:C.text,marginBottom:4}}>{scanResult.name}</div>
+                  {scanResult.brand&&<div style={{fontSize:11,color:C.red,marginBottom:4}}>{scanResult.brand}</div>}
+                  {scanResult.serving&&<div style={{fontSize:10,color:C.muted,marginBottom:12}}>per {scanResult.serving}</div>}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:14}}>
+                    {[{l:"Calories",v:`${scanResult.cal}`,c:C.red},{l:"Protein",v:`${scanResult.protein}g`,c:C.cyan},{l:"Carbs",v:`${scanResult.carbs}g`,c:C.violet},{l:"Fat",v:`${scanResult.fat}g`,c:C.green}].map((x,i)=>(
+                      <div key={i} style={{background:C.subtle,borderRadius:8,padding:"8px 6px",textAlign:"center",border:`1px solid ${C.border}`}}>
+                        <div style={{fontSize:8,color:C.muted,textTransform:"uppercase",marginBottom:2}}>{x.l}</div>
+                        <div style={{fontSize:13,fontWeight:700,color:x.c}}>{x.v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <button onClick={()=>{addFood({name:scanResult.name,cal:scanResult.cal,protein:scanResult.protein,carbs:scanResult.carbs,fat:scanResult.fat});setScanResult(null);setScannerActive(false);setNav("tracker");}} style={btnFn(C.red)}>+ Log to Today</button>
+                    <button onClick={()=>{saveTpl({name:scanResult.name,cal:scanResult.cal,protein:scanResult.protein,carbs:scanResult.carbs,fat:scanResult.fat});setScanResult(null);}} style={btnFn(C.violet)}>💾 Save Template</button>
+                  </div>
+                  <button onClick={()=>{setScanResult(null);setScannerActive(true);}} style={{...btnFn(C.subtle),marginTop:8,color:C.muted,boxShadow:"none",border:`1px solid ${C.border}`}}>Scan Another</button>
+                </div>
+              )}
+
+              {/* Manual barcode entry fallback */}
+              <div style={{...crd}}>
+                <div style={{fontSize:10,color:C.muted,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:8}}>Enter Barcode Manually</div>
+                <div style={{display:"flex",gap:8}}>
+                  <input type="number" placeholder="e.g. 9300652027258" value={scanError==="manual"?"":""} id="fp-manual-barcode" style={{...iStyle,flex:1}}/>
+                  <button onClick={async()=>{
+                    const el=document.getElementById("fp-manual-barcode");
+                    const code=el?.value?.trim();
+                    if(!code)return;
+                    setScanLoading(true);setScanError("");setScanResult(null);
+                    try{
+                      const r=await fetch(`https://world.openfoodfacts.org/api/v0/product/${code}.json`);
+                      const d=await r.json();
+                      if(d.status===1&&d.product){
+                        const p=d.product;
+                        const n=p.nutriments||{};
+                        setScanResult({
+                          name:p.product_name||p.product_name_en||"Unknown Product",
+                          brand:p.brands||"",
+                          serving:p.serving_size||"100g",
+                          cal:Math.round(n["energy-kcal_serving"]||n["energy-kcal_100g"]||0),
+                          protein:Math.round(n.proteins_serving||n.proteins_100g||0),
+                          carbs:Math.round(n.carbohydrates_serving||n.carbohydrates_100g||0),
+                          fat:Math.round(n.fat_serving||n.fat_100g||0),
+                        });
+                        if(el) el.value="";
+                      } else {
+                        setScanError("Product not found. Try searching by name instead.");
+                      }
+                    }catch{setScanError("Lookup failed. Check your connection.");}
+                    setScanLoading(false);
+                  }} style={{...btnFn(C.green),width:"auto",padding:"10px 14px",flexShrink:0}}>
+                    {scanLoading?<Spin col="#fff"/>:"Look up"}
+                  </button>
+                </div>
+                {scanError&&scanError!=="manual"&&<div style={{fontSize:11,color:C.red,marginTop:6}}>{scanError}</div>}
+                <div style={{fontSize:9,color:C.muted,marginTop:6}}>Powered by Open Food Facts — free & open database</div>
+              </div>
             </>
           )}
         </div>
